@@ -1,6 +1,7 @@
 'use client';
 
 import { FieldLabelRow, FieldMessage, composeDescribedBy } from '@/components/ui/field';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -10,6 +11,7 @@ import {
   parseMoselFormula,
 } from '@/lib/mosel-formula';
 import { MoselSpecSchema, type MoselSpec } from '@/schemas/mosel';
+import { ChevronDown } from 'lucide-react';
 
 /** An example to start from, shown as the placeholders. */
 export const MOSEL_ALPHABET_EXAMPLE = 'a, b';
@@ -157,26 +159,8 @@ export function MoselSpecField({
       <FieldMessage
         description={
           <>
-            Conditions: <code>begWt &apos;w&apos;</code>, <code>endWt &apos;w&apos;</code>,{' '}
-            <code>oneOf(&apos;a&apos;, &apos;ab&apos;, &apos;&apos;)</code> (exactly one of the
-            listed words; <code>&apos;&apos;</code> is the empty string),{' '}
-            <code>|indOf &apos;w&apos;| &gt;= k</code> (occurrences of w), <code>|s| = k</code>{' '}
-            (length), <code>|indOf &apos;w&apos;| % m = r</code>, <code>|s| % m = r</code>,{' '}
-            <code>sum(s) % m = r</code> (digit sum; other symbols add nothing),{' '}
-            <code>intBase(b) % m = r</code> (the string as a number in base b; other symbols are
-            skipped), <code>a@(fst + k)</code> and <code>a@(last - k)</code> (the symbol at a
-            position), <code>a@all</code>, <code>a@posMod(m, r)</code> (every position j with j % m
-            = r), <code>fstOc &apos;a&apos; &lt; fstOc &apos;b&apos;</code> (positions; also{' '}
-            <code>fst</code>, <code>last</code>, <code>lastOc</code>),{' '}
-            <code>b@psGt fstOc &apos;b&apos;</code> and{' '}
-            <code>|psLe fstOc &apos;b&apos;| % 2 = 1</code> (the positions before or after one),{' '}
-            <code>isEmpty</code>, <code>true</code> and <code>false</code>. Compare with{' '}
-            <code>=</code>, <code>!=</code>, <code>&lt;</code>, <code>&lt;=</code>,{' '}
-            <code>&gt;</code> or <code>&gt;=</code>. Words go in single or double quotes. Combine
-            with <code>NOT</code>, <code>AND</code>, <code>OR</code>, <code>IMPLIES</code> and{' '}
-            <code>IFF</code> (any case, binding in that order) and parentheses. The alphabet is the
-            symbols the strings are made of, separated by commas or spaces (such as{' '}
-            <code>0, 1</code>); the condition can only name those. Without an answer file,
+            The alphabet is the symbols the strings are made of, separated by commas or spaces (such
+            as <code>0, 1</code>); the condition can only name those. Without an answer file,
             submissions are marked against the strings over the alphabet that satisfy the condition.
             With one, the answer file decides, and the description is used to analyse submissions
             for staff.
@@ -187,6 +171,93 @@ export function MoselSpecField({
         errorId={errorId}
         showDescriptionWithError
       />
+      <MoselSyntaxReference />
     </fieldset>
+  );
+}
+
+/** The conditions a formula can use, each with an example and what it means. */
+const MOSEL_CONDITIONS: Array<{ examples: string[]; meaning: string }> = [
+  { examples: ["begWt 'w'", "endWt 'w'"], meaning: 'Begins or ends with w.' },
+  {
+    examples: ["oneOf('a', 'ab', '')"],
+    meaning: "Is exactly one of the listed words; '' is the empty string.",
+  },
+  { examples: ["|indOf 'w'| >= k"], meaning: 'The number of occurrences of w.' },
+  { examples: ['|s| = k'], meaning: 'The length.' },
+  { examples: ["|indOf 'w'| % m = r", '|s| % m = r'], meaning: 'Either of those, modulo m.' },
+  { examples: ['sum(s) % m = r'], meaning: 'The digit sum, modulo m; other symbols add nothing.' },
+  {
+    examples: ['intBase(b) % m = r'],
+    meaning: 'The string as a number in base b, modulo m; other symbols are skipped.',
+  },
+  { examples: ['a@(fst + k)', 'a@(last - k)'], meaning: 'The symbol at a position is a.' },
+  { examples: ['a@all'], meaning: 'Every symbol is a.' },
+  { examples: ['a@posMod(m, r)'], meaning: 'The symbol at every position j with j % m = r is a.' },
+  {
+    examples: ["fstOc 'a' < fstOc 'b'"],
+    meaning: "Compares positions: fst, last, fstOc 'w' and lastOc 'w', each ± k.",
+  },
+  {
+    examples: ["b@psGt fstOc 'b'", "|psLe fstOc 'b'| % 2 = 1"],
+    meaning:
+      'The positions before or after one (psLt, psLe, psGt, psGe): every symbol there, or how many there are.',
+  },
+  { examples: ['isEmpty'], meaning: 'The string is empty.' },
+  { examples: ['true', 'false'], meaning: 'Always, or never.' },
+];
+
+/** The formula syntax, as a table of conditions and a list of what combines them. Closed at first. */
+function MoselSyntaxReference() {
+  return (
+    <Collapsible className="mt-1">
+      <CollapsibleTrigger className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/70 group -mx-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-medium focus-visible:ring-[3px] focus-visible:outline-none">
+        <ChevronDown
+          className="size-3.5 shrink-0 transition-transform group-data-[state=closed]:-rotate-90"
+          aria-hidden="true"
+        />
+        Condition syntax
+      </CollapsibleTrigger>
+      <CollapsibleContent className="text-muted-foreground flex flex-col gap-2 pt-2 text-xs">
+        <table className="w-full border-collapse">
+          <caption className="sr-only">MOSEL conditions</caption>
+          <thead>
+            <tr className="border-b">
+              <th scope="col" className="text-foreground py-1 pr-3 text-left font-medium">
+                Condition
+              </th>
+              <th scope="col" className="text-foreground py-1 text-left font-medium">
+                Meaning
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {MOSEL_CONDITIONS.map(({ examples, meaning }) => (
+              <tr key={examples[0]} className="border-b last:border-b-0">
+                <td className="py-1 pr-3 align-top">
+                  {examples.map((example) => (
+                    <code key={example} className="block whitespace-nowrap">
+                      {example}
+                    </code>
+                  ))}
+                </td>
+                <td className="py-1 align-top">{meaning}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <ul className="list-disc space-y-0.5 pl-4">
+          <li>
+            Compare with <code>=</code>, <code>!=</code>, <code>&lt;</code>, <code>&lt;=</code>,{' '}
+            <code>&gt;</code> or <code>&gt;=</code>.
+          </li>
+          <li>Words go in single or double quotes.</li>
+          <li>
+            Combine with <code>NOT</code>, <code>AND</code>, <code>OR</code>, <code>IMPLIES</code>{' '}
+            and <code>IFF</code> (any case, binding in that order) and parentheses.
+          </li>
+        </ul>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

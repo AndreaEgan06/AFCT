@@ -173,13 +173,14 @@ describe('CreateProblemDialog', () => {
       fireEvent.change(screen.getByLabelText('Condition'), { target: { value: formula } });
     };
 
-    it('is sent with an FA problem when given, alongside the answer file', async () => {
+    it('is sent with a DFA problem when given, alongside the answer file', async () => {
       const user = userEvent.setup();
       respondCreated();
       renderDialog();
 
       await user.type(screen.getByLabelText('Title'), 'DFA #1');
       await clickNext(user); // -> Type
+      await user.click(screen.getByLabelText('Deterministic'));
       await clickNext(user); // -> Answer
       await user.upload(document.getElementById('answer-file') as HTMLInputElement, answerFile());
       fillDescription('a, b', "endWt 'ab'");
@@ -206,6 +207,7 @@ describe('CreateProblemDialog', () => {
 
       await user.type(screen.getByLabelText('Title'), 'DFA #1');
       await clickNext(user); // -> Type
+      await user.click(screen.getByLabelText('Deterministic'));
       await clickNext(user); // -> Answer
       const nextButton = screen.getByRole('button', { name: 'Next' });
       expect(nextButton).toBeDisabled();
@@ -231,6 +233,7 @@ describe('CreateProblemDialog', () => {
 
       await user.type(screen.getByLabelText('Title'), 'DFA #1');
       await clickNext(user);
+      await user.click(screen.getByLabelText('Deterministic'));
       await clickNext(user);
       await user.upload(document.getElementById('answer-file') as HTMLInputElement, answerFile());
       fillDescription('a, b', "begWt 'ab' AND");

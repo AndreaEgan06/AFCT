@@ -147,10 +147,10 @@ export function CreateProblemDialog({
   const [linkMaxSubmissions, setLinkMaxSubmissions] = useState('1');
   const [linkAutograder, setLinkAutograder] = useState(true);
   const [linkShowFeedback, setLinkShowFeedback] = useState(true);
-  // The MOSEL description (FA only), as the alphabet and formula being edited. Outside the
-  // form for the same reason as the link settings: the strict form schema is shared with edit.
+  // The MOSEL description (deterministic FA only), as the alphabet and formula being edited.
+  // Outside the form for the same reason as the link settings: the strict form schema is shared
+  // with edit.
   const [moselSpec, setMoselSpec] = useState(EMPTY_MOSEL_DRAFT);
-  const moselJson = moselDraftJson(moselSpec);
 
   const linkPointsValue = Number(linkMaxPoints);
   const linkPointsInvalid = !Number.isFinite(linkPointsValue) || linkPointsValue < 0;
@@ -206,7 +206,11 @@ export function CreateProblemDialog({
   const type = watch('type');
   const isUnlimitedStates = watch('isUnlimitedStates');
   const file = watch('file');
-  const specInvalid = type === 'FA' && moselSpecError(moselSpec) !== null;
+  // Only a DFA can be described; anything typed before switching Deterministic off is kept, in
+  // case it is switched back on, but neither checked nor sent.
+  const moselAllowed = type === 'FA' && !!watch('isDeterministic');
+  const moselJson = moselAllowed ? moselDraftJson(moselSpec) : null;
+  const specInvalid = moselAllowed && moselSpecError(moselSpec) !== null;
   // An FA problem can be marked against its description instead of an answer file.
   const answerMissing =
     missingAnswerKey({ type, hasAnswerFile: !!file, hasMoselSpec: !!moselJson }) !== null;
@@ -364,7 +368,7 @@ export function CreateProblemDialog({
       linkMaxSubmissions !== '1' ||
       !linkAutograder ||
       !linkShowFeedback);
-  const specChanged = !isBlankMoselDraft(moselSpec);
+  const specChanged = moselAllowed && !isBlankMoselDraft(moselSpec);
   const { descriptionDirty, onDocumentReady, onDescriptionChange } = useDescriptionDirty();
   // Every changed field EXCEPT the description, which is compared by content above.
   const otherFieldsDirty = Object.keys(dirtyFields).some((k) => k !== 'descriptionJson');
@@ -537,7 +541,7 @@ export function CreateProblemDialog({
                 </>
               )}
 
-              {step === 2 && type === 'FA' && (
+              {step === 2 && moselAllowed && (
                 <p className="text-muted-foreground text-sm">
                   Give an answer file, a language description, or both. Without an answer file,
                   submissions are marked against the description, and students see the same feedback
@@ -583,7 +587,7 @@ export function CreateProblemDialog({
                 />
               )}
 
-              {step === 2 && type === 'FA' && (
+              {step === 2 && moselAllowed && (
                 <MoselSpecField
                   id="problem-mosel-spec"
                   value={moselSpec}
@@ -663,8 +667,12 @@ export function CreateProblemDialog({
                       <>
                         <dt className="text-muted-foreground">Deterministic</dt>
                         <dd>{review.isDeterministic ? 'Yes' : 'No'}</dd>
-                        <dt className="text-muted-foreground">Language description</dt>
-                        <dd>{moselJson ? 'Given' : 'None'}</dd>
+                        {moselAllowed && (
+                          <>
+                            <dt className="text-muted-foreground">Language description</dt>
+                            <dd>{moselJson ? 'Given' : 'None'}</dd>
+                          </>
+                        )}
                       </>
                     )}
                     <dt className="text-muted-foreground">Answer file</dt>
