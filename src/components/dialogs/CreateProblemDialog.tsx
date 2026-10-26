@@ -16,7 +16,12 @@ import InputGroup from '@/components/ui/InputGroup';
 import { RichDescriptionField } from '@/components/rich-description/RichDescriptionField';
 import { useDiscardGuard } from '@/components/unsaved-changes/useDiscardGuard';
 import { serializeRichDescription, type RichDescriptionEnvelope } from '@/lib/rich-description';
-import { ANSWER_FILE_EXTENSIONS, ANSWER_FILE_HINT, answerFileRejection } from '@/lib/answer-file';
+import {
+  ANSWER_FILE_EXTENSIONS,
+  ANSWER_FILE_HINT,
+  answerFileRejection,
+  missingAnswerKey,
+} from '@/lib/answer-file';
 import { LimitField } from '@/components/ui/LimitField';
 import SwitchField from '@/components/ui/SwitchField';
 import { Stepper } from '@/components/ui/stepper';
@@ -34,6 +39,13 @@ import {
 } from '@/schemas/problem';
 import { showToast } from '@/lib/toast';
 import FileUploadInput from '@/components/FileUploadInput';
+import {
+  EMPTY_MOSEL_DRAFT,
+  MoselSpecField,
+  moselDraftJson,
+  moselSpecError,
+  isBlankMoselDraft,
+} from '@/components/MoselSpecField';
 import { useMaxUploadSize } from '@/hooks/use-max-upload-size';
 import { apiPaths } from '@/lib/api-paths';
 import { apiClient, ApiError } from '@/lib/api/fetch-client';
@@ -71,7 +83,7 @@ const BANK_STEPS: ReadonlyArray<WizardStep> = [
     title: 'Type',
     fields: ['type', 'maxStates', 'isUnlimitedStates', 'isDeterministic'],
   },
-  { title: 'Answer File', fields: ['file'] },
+  { title: 'Answer', fields: ['file'] },
   { title: 'Review', fields: [] },
 ];
 // When created from an assignment, an extra step gathers the per-assignment link settings
@@ -79,7 +91,7 @@ const BANK_STEPS: ReadonlyArray<WizardStep> = [
 const SETTINGS_STEP: WizardStep = { title: 'Assignment Settings', fields: [] };
 
 // A guided wizard mirroring the create-assignment wizard. From the course bank it creates
-// the problem definition only (Details, Type, Answer File, Review). Opened from an
+// the problem definition only (Details, Type, Answer, Review). Opened from an
 // assignment it adds an Assignment Settings step and associates the new problem with that
 // assignment using those settings.
 /**
@@ -119,7 +131,7 @@ export function CreateProblemDialog({
   const inAssignment = !!assignmentId;
 
   // The wizard gains an "Assignment Settings" step (before Review) when opened from an
-  // assignment. Answer File stays at index 2 in both shapes, so its gates are unaffected.
+  // assignment. Answer stays at index 2 in both shapes, so its gates are unaffected.
   const STEPS = useMemo<ReadonlyArray<WizardStep>>(
     () => (inAssignment ? [...BANK_STEPS.slice(0, 3), SETTINGS_STEP, BANK_STEPS[3]!] : BANK_STEPS),
     [inAssignment],
@@ -135,6 +147,10 @@ export function CreateProblemDialog({
   const [linkMaxSubmissions, setLinkMaxSubmissions] = useState('1');
   const [linkAutograder, setLinkAutograder] = useState(true);
   const [linkShowFeedback, setLinkShowFeedback] = useState(true);
+  // The MOSEL description (FA only), as the alphabet and formula being edited. Outside the
+  // form for the same reason as the link settings: the strict form schema is shared with edit.
+  const [moselSpec, setMoselSpec] = useState(EMPTY_MOSEL_DRAFT);
+  const moselJson = moselDraftJson(moselSpec);
 
   const linkPointsValue = Number(linkMaxPoints);
   const linkPointsInvalid = !Number.isFinite(linkPointsValue) || linkPointsValue < 0;
@@ -190,6 +206,10 @@ export function CreateProblemDialog({
   const type = watch('type');
   const isUnlimitedStates = watch('isUnlimitedStates');
   const file = watch('file');
+  const specInvalid = type === 'FA' && moselSpecError(moselSpec) !== null;
+  // An FA problem can be marked against its description instead of an answer file.
+  const answerMissing =
+    missingAnswerKey({ type, hasAnswerFile: !!file, hasMoselSpec: !!moselJson }) !== null;
 
   const { maxMb, loading: loadingMaxSize } = useMaxUploadSize();
 
@@ -207,6 +227,7 @@ export function CreateProblemDialog({
     setLinkUnlimited(true);
     setLinkMaxSubmissions('1');
     setLinkAutograder(true);
+    setMoselSpec(EMPTY_MOSEL_DRAFT);
   };
 
   // Reset the form and return to step 1 each time the dialog opens.
@@ -216,8 +237,9 @@ export function CreateProblemDialog({
   }, [open, defaults]);
 
   const next = async () => {
-    // The answer file is required to leave its step (the form schema treats it as optional).
-    if (step === 2 && !file) return;
+    // An answer key is required to leave its step: the file or, for an FA, the description
+    // (the form schema treats the file as optional).
+    if (step === 2 && (answerMissing || specInvalid)) return;
     // The assignment-settings step validates its own local fields (not RHF fields).
     if (isSettingsStep && settingsInvalid) return;
     const ok = await trigger(STEPS[step]?.fields ?? []);
@@ -227,7 +249,8 @@ export function CreateProblemDialog({
 
   const onSubmit = async (raw: FormValues) => {
     try {
-      // Parse with CreateProblemSchema which requires file
+      // CreateProblemSchema checks the file, when there is one; whether there has to be one was
+      // settled on the Answer step.
       const values: ParsedValues = CreateProblemSchema.parse(raw);
 
       const formData = new FormData();
@@ -250,9 +273,10 @@ export function CreateProblemDialog({
       }
       if (values.type === 'FA') {
         formData.append('isDeterministic', String(!!values.isDeterministic));
+        if (moselJson) formData.append('moselSpec', moselJson);
       }
 
-      formData.append('file', values.file);
+      if (values.file) formData.append('file', values.file);
 
       let created: Problem | null = null;
       try {
@@ -340,12 +364,13 @@ export function CreateProblemDialog({
       linkMaxSubmissions !== '1' ||
       !linkAutograder ||
       !linkShowFeedback);
+  const specChanged = !isBlankMoselDraft(moselSpec);
   const { descriptionDirty, onDocumentReady, onDescriptionChange } = useDescriptionDirty();
   // Every changed field EXCEPT the description, which is compared by content above.
   const otherFieldsDirty = Object.keys(dirtyFields).some((k) => k !== 'descriptionJson');
 
   const { requestClose, discardConfirm } = useDiscardGuard({
-    dirty: open && (descriptionDirty || otherFieldsDirty || linkSettingsChanged),
+    dirty: open && (descriptionDirty || otherFieldsDirty || linkSettingsChanged || specChanged),
     onDiscard: () => {
       setOpen(false);
       resetForm();
@@ -368,7 +393,7 @@ export function CreateProblemDialog({
           <DialogHeader>
             <DialogTitle>Create Problem</DialogTitle>
             <DialogDescription className="sr-only">
-              Create a problem step by step: details, type, the answer file
+              Create a problem step by step: details, type, the answer
               {inAssignment ? ', assignment settings' : ''}, then review.
             </DialogDescription>
           </DialogHeader>
@@ -512,6 +537,14 @@ export function CreateProblemDialog({
                 </>
               )}
 
+              {step === 2 && type === 'FA' && (
+                <p className="text-muted-foreground text-sm">
+                  Give an answer file, a language description, or both. Without an answer file,
+                  submissions are marked against the description, and students see the same feedback
+                  an answer file for that language would give them.
+                </p>
+              )}
+
               {step === 2 && (
                 <Controller
                   control={control}
@@ -547,6 +580,15 @@ export function CreateProblemDialog({
                       hint={ANSWER_FILE_HINT}
                     />
                   )}
+                />
+              )}
+
+              {step === 2 && type === 'FA' && (
+                <MoselSpecField
+                  id="problem-mosel-spec"
+                  value={moselSpec}
+                  onChange={setMoselSpec}
+                  label="Language Description (MOSEL)"
                 />
               )}
 
@@ -604,7 +646,7 @@ export function CreateProblemDialog({
 
               {step === LAST_STEP && review && (
                 <div className="space-y-3">
-                  <dl className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-6 gap-y-2 text-sm [&>dt]:break-words [&>dd]:min-w-0 [&>dd]:break-words">
+                  <dl className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-6 gap-y-2 text-sm [&>dd]:min-w-0 [&>dd]:break-words [&>dt]:break-words">
                     <dt className="text-muted-foreground">Title</dt>
                     <dd className="font-medium">{review.title || '—'}</dd>
                     <dt className="text-muted-foreground">Type</dt>
@@ -621,6 +663,8 @@ export function CreateProblemDialog({
                       <>
                         <dt className="text-muted-foreground">Deterministic</dt>
                         <dd>{review.isDeterministic ? 'Yes' : 'No'}</dd>
+                        <dt className="text-muted-foreground">Language description</dt>
+                        <dd>{moselJson ? 'Given' : 'None'}</dd>
                       </>
                     )}
                     <dt className="text-muted-foreground">Answer file</dt>
@@ -660,7 +704,10 @@ export function CreateProblemDialog({
                   key="problem-next"
                   type="button"
                   onClick={() => void next()}
-                  disabled={(step === 2 && !file) || (isSettingsStep && settingsInvalid)}
+                  disabled={
+                    (step === 2 && (answerMissing || specInvalid)) ||
+                    (isSettingsStep && settingsInvalid)
+                  }
                 >
                   Next
                 </Button>
@@ -668,7 +715,9 @@ export function CreateProblemDialog({
                 <Button
                   key="problem-create"
                   type="submit"
-                  disabled={!isValid || isSubmitting || !file || courseIsArchived}
+                  disabled={
+                    !isValid || isSubmitting || answerMissing || specInvalid || courseIsArchived
+                  }
                 >
                   {isSubmitting ? 'Creating…' : 'Create Problem'}
                 </Button>

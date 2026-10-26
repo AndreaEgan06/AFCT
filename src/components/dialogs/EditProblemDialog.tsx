@@ -31,9 +31,20 @@ import { z } from 'zod';
 import type { Problem } from '@prisma/client';
 import { ProblemFormSchema, UpdateProblemSchema, type ProblemFormRaw } from '@/schemas/problem';
 import FileUploadInput from '@/components/FileUploadInput';
+import {
+  MoselSpecField,
+  moselDraftJson,
+  moselSpecDraft,
+  moselSpecError,
+} from '@/components/MoselSpecField';
 import { useMaxUploadSize } from '@/hooks/use-max-upload-size';
 import { showToast } from '@/lib/toast';
-import { ANSWER_FILE_EXTENSIONS, ANSWER_FILE_HINT, answerFileRejection } from '@/lib/answer-file';
+import {
+  ANSWER_FILE_EXTENSIONS,
+  ANSWER_FILE_HINT,
+  answerFileRejection,
+  missingAnswerKey,
+} from '@/lib/answer-file';
 import { apiPaths } from '@/lib/api-paths';
 import { apiClient, ApiError } from '@/lib/api/fetch-client';
 import { shouldEnterAdvanceStep } from '@/lib/wizard-keyboard';
@@ -61,13 +72,13 @@ const TYPE_LABELS: Record<string, string> = {
 const STEPS: ReadonlyArray<{ title: string; fields: FieldPath<FormValues>[] }> = [
   { title: 'Details', fields: ['title', 'descriptionJson'] },
   { title: 'Type', fields: ['type', 'maxStates', 'isUnlimitedStates', 'isDeterministic'] },
-  { title: 'Answer File', fields: ['file'] },
+  { title: 'Answer', fields: ['file'] },
   { title: 'Review', fields: [] },
 ];
 const LAST_STEP = STEPS.length - 1;
 
 // A four-step wizard mirroring the create-problem wizard, for editing the bank problem
-// definition (title, description, type, FA/PDA shape, answer file). The answer file is
+// definition (title, description, type, FA/PDA shape, answer). A new answer file is
 // optional on edit (the current one is kept) unless the problem type changes.
 /**
  * Is the description genuinely different from the one that was loaded?
@@ -156,6 +167,27 @@ export function EditProblemDialog({
   const type = watch('type');
   const isUnlimitedStates = watch('isUnlimitedStates');
 
+  /**
+   * The MOSEL description (FA only), as the alphabet and formula being edited. Outside
+   * the form because the form schema is the strict one shared with create; its JSON is compared
+   * against what was loaded to decide whether to send it at all.
+   */
+  const loadedSpec = moselSpecDraft((problem as { moselSpec?: unknown }).moselSpec);
+  const loadedJson = moselDraftJson(loadedSpec) ?? '';
+  const [moselSpec, setMoselSpec] = useState(loadedSpec);
+  const moselJson = moselDraftJson(moselSpec) ?? '';
+  const specInvalid = type === 'FA' && moselSpecError(moselSpec) !== null;
+  const specChanged = moselJson !== loadedJson;
+  // An FA problem can be marked against its description instead of an answer file, so taking
+  // the description off one that has no file would leave it nothing to mark against.
+  const file = watch('file');
+  const answerMissing =
+    missingAnswerKey({
+      type,
+      hasAnswerFile: !!file || !!problem.fileName,
+      hasMoselSpec: moselJson !== '',
+    }) !== null;
+
   const { maxMb, loading: loadingMaxSize } = useMaxUploadSize();
 
   // A rejection naming the old type stops being true the moment the type changes, and the
@@ -167,6 +199,7 @@ export function EditProblemDialog({
   const resetForm = () => {
     setStep(0);
     setAnswerFileError(undefined);
+    setMoselSpec(loadedSpec);
     reset(defaults, { keepDirty: false, keepTouched: false, keepErrors: false, keepValues: false });
   };
 
@@ -177,6 +210,7 @@ export function EditProblemDialog({
   }, [open, defaults]);
 
   const next = async () => {
+    if (step === 2 && (answerMissing || specInvalid)) return;
     const ok = await trigger(STEPS[step]?.fields ?? []);
     if (ok) setStep((s) => Math.min(s + 1, LAST_STEP));
   };
@@ -218,6 +252,8 @@ export function EditProblemDialog({
       }
       if (payload.type === 'FA') {
         formData.append('isDeterministic', String(!!payload.isDeterministic));
+        // Sent only when changed: absent keeps the stored description, blank removes it.
+        if (specChanged) formData.append('moselSpec', moselJson);
       }
       // Only send a file when the user picked a new one; otherwise the current file is kept.
       if (payload.file instanceof File) {
@@ -274,7 +310,7 @@ export function EditProblemDialog({
   const otherFieldsDirty = Object.keys(dirtyFields).some((k) => k !== 'descriptionJson');
 
   const { requestClose, discardConfirm } = useDiscardGuard({
-    dirty: open && (descriptionDirty || otherFieldsDirty),
+    dirty: open && (descriptionDirty || otherFieldsDirty || specChanged),
     onDiscard: () => {
       setOpen(false);
       resetForm();
@@ -297,7 +333,7 @@ export function EditProblemDialog({
           <DialogHeader>
             <DialogTitle>Edit Problem</DialogTitle>
             <DialogDescription className="sr-only">
-              Edit the problem definition in four steps: details, type, answer file, then review.
+              Edit the problem definition in four steps: details, type, answer, then review.
             </DialogDescription>
           </DialogHeader>
 
@@ -449,6 +485,13 @@ export function EditProblemDialog({
 
               {step === 2 && (
                 <>
+                  {type === 'FA' && (
+                    <p className="text-muted-foreground text-sm">
+                      Give an answer file, a language description, or both. Without an answer file,
+                      submissions are marked against the description, and students see the same
+                      feedback an answer file for that language would give them.
+                    </p>
+                  )}
                   {currentFileName && (
                     <p className="text-muted-foreground text-sm">
                       Current file:{' '}
@@ -492,12 +535,25 @@ export function EditProblemDialog({
                       />
                     )}
                   />
+                  {type === 'FA' && (
+                    <MoselSpecField
+                      id="edit-mosel-spec"
+                      value={moselSpec}
+                      onChange={setMoselSpec}
+                      label="Language Description (MOSEL)"
+                    />
+                  )}
+                  {type === 'FA' && answerMissing && !specInvalid && (
+                    <p className="text-destructive text-sm" role="alert">
+                      This problem has no answer file, so it needs a language description.
+                    </p>
+                  )}
                 </>
               )}
 
               {step === LAST_STEP && review && (
                 <div className="space-y-3">
-                  <dl className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-6 gap-y-2 text-sm [&>dt]:break-words [&>dd]:min-w-0 [&>dd]:break-words">
+                  <dl className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-6 gap-y-2 text-sm [&>dd]:min-w-0 [&>dd]:break-words [&>dt]:break-words">
                     <dt className="text-muted-foreground">Title</dt>
                     <dd className="font-medium">{review.title || '—'}</dd>
                     <dt className="text-muted-foreground">Type</dt>
@@ -514,6 +570,8 @@ export function EditProblemDialog({
                       <>
                         <dt className="text-muted-foreground">Deterministic</dt>
                         <dd>{review.isDeterministic ? 'Yes' : 'No'}</dd>
+                        <dt className="text-muted-foreground">Language description</dt>
+                        <dd>{moselJson ? (specChanged ? 'Changed' : 'Unchanged') : 'None'}</dd>
                       </>
                     )}
                     <dt className="text-muted-foreground">Answer file</dt>
@@ -537,14 +595,21 @@ export function EditProblemDialog({
               )}
 
               {step < LAST_STEP ? (
-                <Button key="edit-next" type="button" onClick={() => void next()}>
+                <Button
+                  key="edit-next"
+                  type="button"
+                  onClick={() => void next()}
+                  disabled={step === 2 && (answerMissing || specInvalid)}
+                >
                   Next
                 </Button>
               ) : (
                 <Button
                   key="edit-save"
                   type="submit"
-                  disabled={!isValid || isSubmitting || courseIsArchived}
+                  disabled={
+                    !isValid || isSubmitting || answerMissing || specInvalid || courseIsArchived
+                  }
                 >
                   {isSubmitting ? 'Saving…' : 'Save Changes'}
                 </Button>

@@ -63,19 +63,33 @@ console.log(
   `Evaluating ${manifest.cases.length} golden case(s) against ${path.relative(ROOT, JAR)}\n`,
 );
 
+/**
+ * One run of the jar for a case. A case with `gradingConfig` sends it the way production does
+ * (buildGradingConfig in src/lib/evaluator-runner.ts): `--grading-config -`, with the JSON on
+ * stdin. One with `"answer": null` is marked against that config's MOSEL description
+ * (`--answer-from-mosel`), as a problem with no answer file is. `answerFile` overrides the
+ * case's answer, for the comparison run below.
+ * RUBRIC: these cases guard that the shipped jar accepts the rubric and returns a score.
+ */
+async function evaluate(c, answerFile = c.answer) {
+  const answerArgs =
+    answerFile === null ? ['--answer-from-mosel'] : [path.join(CASES_DIR, answerFile)];
+  const submission = path.join(CASES_DIR, c.submission);
+  const gradingArgs = c.gradingConfig ? ['--grading-config', '-'] : [];
+  const args = ['--json', ...gradingArgs, ...answerArgs, submission, ...typeArgs(c)];
+  const { stdout } = await runner.execute(args, {
+    timeout: EVAL_TIMEOUT_MS,
+    maxMemoryMb: 512,
+    env: evalEnv,
+    ...(c.gradingConfig ? { input: JSON.stringify(c.gradingConfig) } : {}),
+  });
+  return parseFeedback(stdout);
+}
+
 let failures = 0;
 for (const c of manifest.cases) {
-  const answer = path.join(CASES_DIR, c.answer);
-  const submission = path.join(CASES_DIR, c.submission);
-  const args = ['--json', answer, submission, ...typeArgs(c)];
-
   try {
-    const { stdout } = await runner.execute(args, {
-      timeout: EVAL_TIMEOUT_MS,
-      maxMemoryMb: 512,
-      env: evalEnv,
-    });
-    const feedback = parseFeedback(stdout);
+    const feedback = await evaluate(c);
     if (typeof feedback.correct !== 'boolean') {
       throw new Error(
         `evaluator returned no boolean 'correct' (feedback: ${feedback.feedback ?? '?'})`,
@@ -97,6 +111,38 @@ for (const c of manifest.cases) {
         );
         continue;
       }
+    }
+
+    // The score the rubric gave, and whether a MOSEL analysis came back.
+    const gradingProblems = [];
+    if ('expectScore' in c && feedback.score !== c.expectScore) {
+      gradingProblems.push(`expected score=${c.expectScore}, got ${feedback.score}`);
+    }
+    if (c.expectConflictedStates !== undefined) {
+      const conflicted = feedback.analysis?.counts?.CONFLICTED;
+      if (conflicted !== c.expectConflictedStates) {
+        gradingProblems.push(
+          `expected ${c.expectConflictedStates} conflicted state(s) in the analysis, got ${conflicted}`,
+        );
+      }
+    }
+    // Marked against a description, the student must see exactly what an answer file for
+    // the same language would have shown them.
+    if (c.sameFeedbackAs) {
+      const reference = await evaluate(c, c.sameFeedbackAs);
+      for (const key of ['correct', 'feedback']) {
+        if (feedback[key] !== reference[key]) {
+          gradingProblems.push(
+            `${key} differs from grading against ${c.sameFeedbackAs}: ` +
+              `${JSON.stringify(feedback[key])} vs ${JSON.stringify(reference[key])}`,
+          );
+        }
+      }
+    }
+    if (gradingProblems.length > 0) {
+      failures++;
+      console.error(`  FAIL  ${c.name}\n        ${gradingProblems.join('\n        ')}`);
+      continue;
     }
 
     if (feedback.correct === c.expectCorrect) {

@@ -56,7 +56,7 @@ vi.mock('fs', () => ({
 vi.mock('child_process', () => ({ execSync: execSyncMock }));
 vi.mock('os', () => ({ default: { platform: platformMock }, platform: platformMock }));
 
-import { __test__, yieldsAGrade } from '@/lib/submission-worker';
+import { __test__, earnedPointsFor, yieldsAGrade } from '@/lib/submission-worker';
 
 const {
   evaluateSubmission,
@@ -102,6 +102,27 @@ describe('yieldsAGrade', () => {
 });
 
 
+
+/**
+ * RUBRIC: the score-to-points rule. Correct is always full marks; only an incorrect answer's
+ * worth comes from the rubric. With no score, or the binary placeholder's 0, it is the old
+ * `correct ? maxPoints : 0` exactly.
+ */
+describe('earnedPointsFor', () => {
+  const cases: [string, { correct?: boolean; score?: number }, number][] = [
+    ['correct with no rubric', { correct: true }, 10],
+    ['incorrect with no rubric', { correct: false }, 0],
+    ['correct under the binary rubric', { correct: true, score: 1 }, 10],
+    ['incorrect under the binary rubric', { correct: false, score: 0 }, 0],
+    ['incorrect with a partial score', { correct: false, score: 0.5 }, 5],
+    ['correct even if a rubric scored it lower', { correct: true, score: 0.2 }, 10],
+    ['rounded to two places', { correct: false, score: 1 / 3 }, 3.33],
+  ];
+
+  it.each(cases)('%s', (_name, evaluation, expected) => {
+    expect(earnedPointsFor(evaluation, 10)).toBe(expected);
+  });
+});
 
 const makeSubmission = (over: Record<string, any> = {}): any => ({
   id: 'sub-1',
@@ -171,6 +192,25 @@ describe('runJavaEvaluator — guard branches', () => {
     const result = await runJavaEvaluator(submission, CONFIG);
     expect(result.status).toBe('FAILED');
     expect(result.feedback).toBe('ERROR: No answer file configured for this problem.');
+  });
+
+  it('marks an FA problem with no answer file against its description, and records it', async () => {
+    executeMock.mockResolvedValue({ stdout: '{"correct":true,"feedback":"Correct!"}', stderr: '' });
+    const spec = { alphabet: ['0', '1'], condition: { kind: 'count', w: '10', cmp: '=', n: 0 } };
+    const submission = makeSubmission();
+    Object.assign(submission.assignmentProblem.problem, {
+      fileName: null,
+      type: 'FA',
+      moselSpec: spec,
+    });
+
+    const result = await runJavaEvaluator(submission, CONFIG);
+
+    expect(result).toMatchObject({ status: 'COMPLETED', correct: true, answerMoselSpec: spec });
+    expect(result.answerFileName).toBeUndefined();
+    const args = executeMock.mock.calls[0][0] as string[];
+    expect(args).toContain('--answer-from-mosel');
+    expect(args.some((a) => a.includes('solutions'))).toBe(false);
   });
 
   it('fails when the answer file is missing on the server', async () => {
@@ -371,6 +411,70 @@ describe('evaluateSubmission', () => {
     // before the setting existed.
     expect(prismaMock.submission.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ feedbackShown: false }) }),
+    );
+  });
+
+  // RUBRIC: the rubric and description reach the jar, and the score and snapshot come back.
+  it('sends the description and rubric, then records the score and the rubric it used', async () => {
+    const spec = { condition: { kind: 'endWt', w: 'ab' } };
+    const rubric = { version: 1, kind: 'binary' };
+    const submission = makeSubmission();
+    submission.assignmentProblem.problem = {
+      fileName: 'answer.txt',
+      type: 'FA',
+      maxStates: null,
+      isDeterministic: false,
+      moselSpec: spec,
+    };
+    submission.assignmentProblem.rubric = { definition: rubric };
+    prismaMock.submission.findUnique.mockResolvedValue(submission);
+    executeMock.mockResolvedValue({
+      stdout: '{"correct":false,"feedback":"nope","score":0.0,"analysis":{"counts":{}}}',
+      stderr: '',
+    });
+
+    await evaluateSubmission('sub-1', CLAIM);
+
+    const [args, options] = executeMock.mock.calls[0];
+    expect(args.slice(0, 3)).toEqual(['--json', '--grading-config', '-']);
+    expect(JSON.parse(options.input)).toEqual({ mosel: spec, rubric });
+    expect(prismaMock.submission.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ score: 0, rubricSnapshot: rubric }),
+      }),
+    );
+    expect(prismaMock.assignmentProblemGrade.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: [expect.objectContaining({ grade: 0 })] }),
+    );
+  });
+
+  it('records no score or rubric when none applied', async () => {
+    prismaMock.submission.findUnique.mockResolvedValue(makeSubmission());
+    executeMock.mockResolvedValue({ stdout: '{"correct":false,"feedback":"nope"}', stderr: '' });
+
+    await evaluateSubmission('sub-1', CLAIM);
+
+    expect(executeMock.mock.calls[0][0]).not.toContain('--grading-config');
+    expect(prismaMock.submission.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ score: null, rubricSnapshot: Prisma.DbNull }),
+      }),
+    );
+  });
+
+  it('turns a partial score into partial points', async () => {
+    const submission = makeSubmission();
+    submission.assignmentProblem.rubric = { definition: { version: 1, kind: 'binary' } };
+    prismaMock.submission.findUnique.mockResolvedValue(submission);
+    executeMock.mockResolvedValue({
+      stdout: '{"correct":false,"feedback":"nope","score":0.25}',
+      stderr: '',
+    });
+
+    await evaluateSubmission('sub-1', CLAIM);
+
+    expect(prismaMock.assignmentProblemGrade.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: [expect.objectContaining({ grade: 2.5 })] }),
     );
   });
 

@@ -1038,6 +1038,7 @@ erDiagram
   ProblemType type "nullable"
   Int maxStates "nullable"
   Boolean isDeterministic "nullable"
+  Json moselSpec "nullable"
   DateTime createdAt
   DateTime updatedAt
   String courseId FK
@@ -1050,6 +1051,7 @@ erDiagram
   Boolean autograderEnabled
   DateTime createdAt
   Boolean showFeedback
+  String rubricId FK "nullable"
 }
 "SubmissionGrant" {
   String id PK
@@ -1061,6 +1063,15 @@ erDiagram
   Int extraSubmissions
   String reason "nullable"
   String createdById FK "nullable"
+  DateTime createdAt
+  DateTime updatedAt
+}
+"Rubric" {
+  String id PK
+  String name
+  String description "nullable"
+  Json definition
+  String ownerId FK
   DateTime createdAt
   DateTime updatedAt
 }
@@ -1130,10 +1141,12 @@ erDiagram
 "Problem" }o--|| "Course" : course
 "AssignmentProblem" }o--|| "Assignment" : assignment
 "AssignmentProblem" }o--|| "Problem" : problem
+"AssignmentProblem" }o--o| "Rubric" : rubric
 "SubmissionGrant" }o--|| "AssignmentProblem" : assignmentProblem
 "SubmissionGrant" }o--o| "User" : user
 "SubmissionGrant" }o--o| "StudentGroup" : studentGroup
 "SubmissionGrant" }o--o| "User" : createdBy
+"Rubric" }o--|| "User" : owner
 "GroupSet" }o--|| "Course" : course
 "StudentGroup" }o--|| "GroupSet" : groupSet
 ```
@@ -1231,7 +1244,9 @@ Properties as follows:
 - `description`: The problem statement, as plain text.
 - `descriptionFormat`: Whether the statement is plain text or formatted.
 - `descriptionJson`: Formatted statement, when the problem uses rich text.
-- `fileName`: Stored reference solution file.
+- `fileName`
+  > Stored reference solution file. Empty for a finite automaton problem defined by its
+  > MOSEL description alone.
 - `originalFileName`: Name of the reference file as uploaded, for display.
 - `answerContentHash`
   > The same two fingerprints a submission carries, taken over the reference solution. A
@@ -1241,6 +1256,16 @@ Properties as follows:
 - `type`: What kind of problem this is: finite automaton, regular expression, grammar, pushdown automaton or Turing machine.
 - `maxStates`: Largest number of states a solution may use. Empty means no limit.
 - `isDeterministic`: Whether the solution must be deterministic.
+- `moselSpec`
+  > The target language as a MOSEL description (an alphabet and a condition), for finite
+  > automaton problems only.
+  >
+  > A problem needs an answer file, this, or both. Without an answer file, submissions are
+  > marked against the DFA the evaluator builds from the description, by the same equivalence
+  > check and the same kind of witness feedback an answer file would give. With one, the answer
+  > file stays the authority on what is correct. Either way the evaluator also checks each
+  > state of a submitted automaton against the description and stores that analysis with the
+  > attempt. JSON shape in src/schemas/mosel.ts.
 - `createdAt`: When this record was created.
 - `updatedAt`: When this record was last changed.
 - `courseId`: The course this problem belongs to.
@@ -1274,6 +1299,7 @@ Properties as follows:
   > This is a study variable (RQ5 compares the witness string being shown against not), which is
   > why `Submission.feedbackShown` records the value each attempt was actually graded under
   > rather than this being read back later as though it had never changed.
+- `rubricId`: Which rubric.
 
 ### `SubmissionGrant`
 
@@ -1297,6 +1323,29 @@ Properties as follows:
 - `createdAt`: When this record was created.
 - `updatedAt`: When this record was last changed.
 
+### `Rubric`
+
+A grading rubric in an instructor's own library: how an evaluation becomes a grade.
+
+Owned by a person rather than a course, so an instructor can reuse one rubric on as many
+problems, assignments and courses as they like. Course staff can see a rubric attached in
+their course; only its owner (or an administrator) changes it, and anybody else duplicates it
+to get their own copy. A rubric in use cannot be deleted.
+
+The shape of a real rubric is not decided yet. Until it is, the only definition that can
+exist is `{ "version": 1, "kind": "binary" }`, which grades exactly like having no rubric.
+Every place that will need to change is listed in RUBRIC_LOCATIONS.md next to the plan.
+
+Properties as follows:
+
+- `id`: Unique identifier.
+- `name`: What the instructor calls it.
+- `description`: A note on what it is for.
+- `definition`: What the rubric does, as JSON. Shape in src/schemas/rubric.ts.
+- `ownerId`: The instructor whose library it is in.
+- `createdAt`: When this record was created.
+- `updatedAt`: When this record was last changed.
+
 ## Submissions
 
 ```mermaid
@@ -1307,11 +1356,14 @@ erDiagram
   Boolean feedbackShown "nullable"
   Boolean correct "nullable"
   Json evaluationRaw "nullable"
+  Float score "nullable"
+  Json rubricSnapshot "nullable"
   String fileName "nullable"
   String originalFileName "nullable"
   String contentHash "nullable"
   String shapeHash "nullable"
   String answerFileName "nullable"
+  Json answerMoselSpec "nullable"
   String byteHash "nullable"
   Json provenanceFeatures "nullable"
   DateTime createdAt
@@ -1433,6 +1485,7 @@ erDiagram
   ProblemType type "nullable"
   Int maxStates "nullable"
   Boolean isDeterministic "nullable"
+  Json moselSpec "nullable"
   DateTime createdAt
   DateTime updatedAt
   String courseId FK
@@ -1445,6 +1498,7 @@ erDiagram
   Boolean autograderEnabled
   DateTime createdAt
   Boolean showFeedback
+  String rubricId FK "nullable"
 }
 "StudentGroup" {
   String id PK
@@ -1492,7 +1546,17 @@ Properties as follows:
   > actually under. Null for anything graded before the setting existed, which is honest: those
   > attempts predate the distinction. See RQ5 in the grant.
 - `correct`: Whether the attempt was judged correct. Empty until grading finishes.
-- `evaluationRaw`: Full grader output, kept for diagnosis.
+- `evaluationRaw`
+  > Full grader output, kept for diagnosis. For a finite automaton problem with a MOSEL
+  > description this includes the state-by-state analysis, which is not shown to students.
+- `score`
+  > The score the rubric gave, from 0 to 1. Empty when no rubric applied, which grades as
+  > full points when correct and nothing otherwise.
+- `rubricSnapshot`
+  > The rubric definition this attempt was graded under, copied rather than referenced.
+  >
+  > The same rule as `answerFileName`: editing a rubric does not move grades already given,
+  > and staff rerun submissions on purpose to apply an edit. Empty when no rubric applied.
 - `fileName`: Stored submitted file.
 - `originalFileName`: Name of the file as the student sent it.
 - `contentHash`
@@ -1519,8 +1583,13 @@ Properties as follows:
   > can still be named, which is what this does, and why a replaced key is now kept rather
   > than deleted.
   >
-  > Null for attempts marked before this existed, and for anything that never reached the
-  > evaluator: a submission with no file, a missing answer key, a failed run.
+  > Null for attempts marked before this existed, for attempts marked against a MOSEL
+  > description (see `answerMoselSpec`), and for anything that never reached the evaluator: a
+  > submission with no file, a missing answer key, a failed run.
+- `answerMoselSpec`
+  > The MOSEL description this attempt was marked against, copied, when its problem had no
+  > answer file. The same record as `answerFileName`, for a key that is not a file: editing
+  > the description later does not change what this attempt says it was measured against.
 - `byteHash`
   > sha256 of the file exactly as it arrived, with nothing normalised away. The two hashes
   > above look past the incidental on purpose, which is why neither can say "this is the
@@ -1700,12 +1769,15 @@ erDiagram
   ProblemType problemType
   Int maxStates "nullable"
   Boolean isDeterministic "nullable"
+  Json moselSpec "nullable"
+  Json rubricDefinition "nullable"
   String answerFileName "nullable"
   String submissionFileName "nullable"
-  String answerOriginalName
+  String answerOriginalName "nullable"
   String submissionOriginalName
   EvaluatorTrialState state
   Boolean correct "nullable"
+  Float score "nullable"
   String feedback "nullable"
   Json evaluationRaw "nullable"
   String stderr "nullable"
@@ -1787,6 +1859,7 @@ erDiagram
   ProblemType type "nullable"
   Int maxStates "nullable"
   Boolean isDeterministic "nullable"
+  Json moselSpec "nullable"
   DateTime createdAt
   DateTime updatedAt
   String courseId FK
@@ -1797,11 +1870,14 @@ erDiagram
   Boolean feedbackShown "nullable"
   Boolean correct "nullable"
   Json evaluationRaw "nullable"
+  Float score "nullable"
+  Json rubricSnapshot "nullable"
   String fileName "nullable"
   String originalFileName "nullable"
   String contentHash "nullable"
   String shapeHash "nullable"
   String answerFileName "nullable"
+  Json answerMoselSpec "nullable"
   String byteHash "nullable"
   Json provenanceFeatures "nullable"
   DateTime createdAt
@@ -1989,14 +2065,21 @@ Properties as follows:
   > carry a state bound, and FA a determinism flag as well.
 - `maxStates`: State bound for FA/PDA, as on the problem itself. Empty means unbounded.
 - `isDeterministic`: Whether an FA answer must be deterministic.
+- `moselSpec`
+  > An optional MOSEL description, as on a problem: what an FA submission is marked against
+  > when there is no answer file, and analysed against either way.
+- `rubricDefinition`: An optional rubric definition to score the run with.
 - `answerFileName`
   > Stored upload names under the trials directory. Cleared when the files are deleted,
   > which is what tells the orphan sweep it has nothing left to remove for this row.
 - `submissionFileName`:
-- `answerOriginalName`: What the uploader called the files, kept for display after the uploads are gone.
+- `answerOriginalName`
+  > What the uploader called the files, kept for display after the uploads are gone. No
+  > answer name means the run had no answer file and was marked against `moselSpec`.
 - `submissionOriginalName`:
 - `state`: Where the run has got to.
 - `correct`: Whether the evaluator judged the submitted file correct. Empty until it finishes.
+- `score`: The rubric's score, from 0 to 1, when the trial ran with one.
 - `feedback`: The evaluator's feedback, or the reason it produced none.
 - `evaluationRaw`: Full evaluator output, which is the point of the page.
 - `stderr`: Anything the jar wrote to stderr, shown as a diagnostic.

@@ -13,7 +13,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import type { PrismaClient, Problem } from '@prisma/client';
+import { Prisma, type PrismaClient, type Problem } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { safeStoredFilename, resolveInsideDir } from '@/lib/safe-upload';
 import { descriptionCopyData, descriptionWriteData } from '@/lib/description-write';
@@ -29,10 +29,20 @@ type CopyableSource = Pick<
   | 'type'
   | 'maxStates'
   | 'isDeterministic'
+  | 'moselSpec'
   // The fingerprints of the answer key, carried with the file they describe.
   | 'answerContentHash'
   | 'answerShapeHash'
 >;
+
+/**
+ * The MOSEL description as a create input. It describes the problem's language rather than its
+ * answer file, so it is carried whether or not the file was. Read back it is a JsonValue, and a
+ * create cannot take a bare null for a Json column.
+ */
+export function moselSpecCopy(spec: Prisma.JsonValue | null | undefined) {
+  return spec == null ? Prisma.DbNull : (spec as Prisma.InputJsonValue);
+}
 
 export type ProblemCopyResult = {
   created: Problem;
@@ -118,6 +128,7 @@ export async function copyProblemInto(opts: {
         type: opts.source.type,
         maxStates: opts.source.maxStates,
         isDeterministic: opts.source.isDeterministic,
+        moselSpec: moselSpecCopy(opts.source.moselSpec),
         fileName: newFileName,
         // Only carry the display name when a file was actually copied.
         originalFileName: newFileName ? (opts.source.originalFileName ?? null) : null,
@@ -190,6 +201,8 @@ export const assignmentProblemSelect = {
   maxSubmissions: true,
   autograderEnabled: true,
   showFeedback: true,
+  // RUBRIC: carried by reference; rubrics belong to an instructor, not a course.
+  rubricId: true,
   problem: {
     select: {
       id: true,
@@ -200,6 +213,7 @@ export const assignmentProblemSelect = {
       type: true,
       maxStates: true,
       isDeterministic: true,
+      moselSpec: true,
       fileName: true,
       originalFileName: true,
       // The fingerprints of the answer key, carried with the file they describe. Without
@@ -218,6 +232,7 @@ type SourceProblemLink = {
   maxSubmissions: number;
   autograderEnabled: boolean;
   showFeedback: boolean;
+  rubricId: string | null;
   problem: Pick<
     Problem,
     | 'id'
@@ -228,6 +243,7 @@ type SourceProblemLink = {
     | 'type'
     | 'maxStates'
     | 'isDeterministic'
+    | 'moselSpec'
     | 'fileName'
     | 'originalFileName'
     | 'answerContentHash'
@@ -270,6 +286,7 @@ export async function attachCopiedProblems(
         type: p.type,
         maxStates: p.maxStates,
         isDeterministic: p.isDeterministic,
+        moselSpec: moselSpecCopy(p.moselSpec),
         fileName: key.fileName,
         originalFileName: key.originalFileName,
         // Only alongside a file that was actually copied. A fingerprint on a problem with no
@@ -294,6 +311,9 @@ export async function attachCopiedProblems(
         // Carried, not defaulted. The column defaults to true, so omitting it here turns
         // feedback back on for every copied problem, and this is a study condition.
         showFeedback: link.showFeedback,
+        // RUBRIC: the same rubric, by reference. It is the instructor's, not the course's, so a
+        // copy grades the way the original does.
+        rubricId: link.rubricId,
       },
     });
   }

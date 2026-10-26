@@ -27,6 +27,7 @@ const ids = {
   problem: `p-${SUFFIX}`,
   groupSet: `gs-${SUFFIX}`,
   group: `g-${SUFFIX}`,
+  rubric: `r-${SUFFIX}`,
 };
 
 async function destroyFixtures() {
@@ -41,6 +42,7 @@ async function destroyFixtures() {
   await prisma.assignmentProblemGrade.deleteMany({ where: { assignmentId: ids.assignment } });
   await prisma.groupMembership.deleteMany({ where: { courseId: ids.course } });
   await prisma.assignmentProblem.deleteMany({ where: { assignmentId: ids.assignment } });
+  await prisma.rubric.deleteMany({ where: { id: ids.rubric } });
   await prisma.assignment.deleteMany({ where: { id: ids.assignment } });
   await prisma.problem.deleteMany({ where: { id: ids.problem } });
   await prisma.studentGroup.deleteMany({ where: { groupSetId: ids.groupSet } });
@@ -340,5 +342,58 @@ describe('deleting an account removes that student’s own work', () => {
 
     expect(await prisma.submission.findUnique({ where: { id: submission.id } })).toBeNull();
     expect(await prisma.activityLog.findUnique({ where: { id: entry.id } })).not.toBeNull();
+  });
+});
+
+// RUBRIC: a rubric belongs to a person, and the problems that use it must not go with it.
+describe('a rubric and the problems it grades', () => {
+  const attachRubric = async () => {
+    await prisma.rubric.create({
+      data: {
+        id: ids.rubric,
+        name: 'Cascade rubric',
+        definition: { version: 1, kind: 'binary' },
+        ownerId: ids.staff,
+      },
+    });
+    await prisma.assignmentProblem.update({
+      where: { assignmentId_problemId: { assignmentId: ids.assignment, problemId: ids.problem } },
+      data: { rubricId: ids.rubric },
+    });
+  };
+  const link = () =>
+    prisma.assignmentProblem.findUnique({
+      where: { assignmentId_problemId: { assignmentId: ids.assignment, problemId: ids.problem } },
+    });
+
+  it('goes with its owner, and the problem it graded falls back to having none', async () => {
+    await attachRubric();
+
+    await prisma.user.delete({ where: { id: ids.staff } });
+
+    expect(await prisma.rubric.findUnique({ where: { id: ids.rubric } })).toBeNull();
+    const after = await link();
+    expect(after).not.toBeNull();
+    expect(after?.rubricId).toBeNull();
+    expect(after?.maxPoints).toBe(100);
+  });
+
+  it('is not deleted by the route’s guarded delete while a problem uses it', async () => {
+    await attachRubric();
+
+    const deleted = await prisma.rubric.deleteMany({
+      where: { id: ids.rubric, assignmentProblems: { none: {} } },
+    });
+
+    expect(deleted.count).toBe(0);
+    expect((await link())?.rubricId).toBe(ids.rubric);
+  });
+
+  it('survives the course whose problems used it', async () => {
+    await attachRubric();
+
+    await prisma.course.delete({ where: { id: ids.course } });
+
+    expect(await prisma.rubric.findUnique({ where: { id: ids.rubric } })).not.toBeNull();
   });
 });

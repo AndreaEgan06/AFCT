@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import fs from 'fs';
 import path from 'path';
-import type { ProblemType } from '@prisma/client';
+import { Prisma, type ProblemType } from '@prisma/client';
 import { createEnhancedActivityLog } from '@/lib/activity-log-utils';
 import { logError } from '@/lib/api/activity';
 import { getSystemUploadLimit } from '@/lib/upload-limits';
@@ -12,6 +12,7 @@ import { safeStoredFilename, resolveInsideDir } from '@/lib/safe-upload';
 import { submissionContentHash, submissionShapeHash } from '@/lib/similarity/content-hash';
 import { readFormData } from '@/lib/api/request';
 import { descriptionWriteData } from '@/lib/description-write';
+import { missingAnswerKey } from '@/lib/answer-file';
 import {
   ProblemUpdateApiSchema,
   ALLOWED_PROBLEM_EXTENSIONS,
@@ -25,7 +26,9 @@ const uploadsDir = path.join('/private', 'uploads', 'solutions');
  * Updates a problem within a course (multipart/form-data). Course staff (faculty or
  * TAs) or a system admin. The problem must belong to the course in the path. Sending a
  * new file replaces the stored solution; it's structure-validated and size-checked
- * first, and the previous file is removed. Omitting the file keeps the current one.
+ * first, and the previous file is removed. Omitting the file keeps the current one. A
+ * problem must keep an answer key: an answer file or, for an FA problem, a MOSEL
+ * description (or both).
  * @openapi
  * summary: Update a course problem
  * parameters:
@@ -44,10 +47,11 @@ const uploadsDir = path.join('/private', 'uploads', 'solutions');
  *           type: { type: string }
  *           maxStates: { type: string }
  *           isDeterministic: { type: string, enum: ['true', 'false'] }
+ *           moselSpec: { type: string, description: "FA only: the MOSEL description (JSON). Omit to keep it, send blank to remove it." }
  *           file: { type: string, format: binary, description: Optional new solution file }
  * responses:
  *   200: { description: The updated problem. }
- *   400: { description: Missing fields or the new file failed structure validation. }
+ *   400: { description: "Missing fields, no answer key left, or the new file failed structure validation." }
  *   401: { description: Not signed in. }
  *   403: { description: Caller is not course staff (faculty or TA) or a system admin. }
  *   404: { description: Problem not found in this course. }
@@ -134,6 +138,22 @@ export const PUT = withCourseAuth(
         }
       }
 
+      // The problem as it would be saved still needs something to mark submissions against.
+      const keptSpec =
+        type !== 'FA'
+          ? null
+          : data.moselSpec !== undefined
+            ? data.moselSpec
+            : existingProblem.moselSpec;
+      const missing = missingAnswerKey({
+        type,
+        hasAnswerFile: !keepingExistingFile || existingProblem.fileName != null,
+        hasMoselSpec: keptSpec != null,
+      });
+      if (missing) {
+        return NextResponse.json({ error: missing }, { status: 400 });
+      }
+
       // Handle file update if a new file is provided
       if (file && file.size > 0) {
         // Enforce the solution-file extension allow-list server-side.
@@ -207,6 +227,15 @@ export const PUT = withCourseAuth(
             ...(answerContentHash !== undefined ? { answerContentHash, answerShapeHash } : {}),
             maxStates: ['FA', 'PDA'].includes(type) ? (data.maxStates ?? 0) || null : null,
             isDeterministic: type === 'FA' ? (data.isDeterministic ?? false) : null,
+            // Only an FA problem has a description, like the state cap and determinism above.
+            // On an FA problem: omitted keeps it, blank (null) removes it.
+            ...(type !== 'FA'
+              ? { moselSpec: Prisma.DbNull }
+              : data.moselSpec === null
+                ? { moselSpec: Prisma.DbNull }
+                : data.moselSpec !== undefined
+                  ? { moselSpec: data.moselSpec }
+                  : {}),
           },
         });
       } catch (dbErr) {
@@ -253,6 +282,7 @@ export const PUT = withCourseAuth(
           problemType: type,
           fileName,
           fileUpdated: !!file,
+          hasMoselSpec: updatedProblem.moselSpec != null,
         },
       });
 

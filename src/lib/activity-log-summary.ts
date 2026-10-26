@@ -430,6 +430,15 @@ function inside(what: string | null, where: string | null): string | null {
   return where ? `${what} in ${where}` : what;
 }
 
+/**
+ * A rubric by name. Rubrics belong to a person, not a course, so there is no record to point at.
+ * RUBRIC: how the rubric actions read in the activity log.
+ */
+function rubricNamed(meta: Metadata): string {
+  const name = str(meta, 'rubricName');
+  return name ? `Rubric "${name}"` : 'Rubric';
+}
+
 /** Actions whose object is not simply the record they point at: "Course grades for X", not "X". */
 const OBJECT_BY_ACTION: Record<
   string,
@@ -514,6 +523,10 @@ const OBJECT_BY_ACTION: Record<
     const where = assignmentNamed(m, r);
     return where ? `${where} audience` : 'Assignment audience';
   },
+  RUBRIC_CREATED: (m) => rubricNamed(m),
+  RUBRIC_UPDATED: (m) => rubricNamed(m),
+  RUBRIC_DELETED: (m) => rubricNamed(m),
+  RUBRIC_DUPLICATED: (m) => rubricNamed(m),
   UPDATE_ASSIGNMENT_PROBLEM_SETTINGS: (m, r) => {
     const where = inside(problemNamed(m, r), assignmentNamed(m, r));
     return where ? `${where} settings` : 'Assignment problem settings';
@@ -1452,6 +1465,7 @@ const FIELD_LABELS: Record<string, string> = {
   // "Show feedback: true to false" reads as a database column. This is a study condition, and
   // the log is what says which one a class was under.
   showFeedback: 'Feedback shown to students',
+  rubricId: 'Rubric',
   accountsCreated: 'New accounts',
   identitiesLinked: 'Sign-ins connected',
   clientId: 'Client ID',

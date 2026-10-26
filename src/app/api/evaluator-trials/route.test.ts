@@ -181,6 +181,28 @@ describe('POST /api/evaluator-trials', () => {
     expect(writeFileMock).not.toHaveBeenCalled();
   });
 
+  it('requires an answer file, unless an FA trial gives a description instead', async () => {
+    const without = await submit({}, { answer: null });
+    expect(without.status).toBe(400);
+    expect(writeFileMock).not.toHaveBeenCalled();
+
+    const spec = { alphabet: ['0', '1'], condition: { kind: 'count', w: '10', cmp: '=', n: 0 } };
+    const res = await submit({ moselSpec: JSON.stringify(spec) }, { answer: null });
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ answerFile: null, submissionFile: 'student.jff' });
+    expect(writeFileMock).toHaveBeenCalledTimes(1);
+    expect(prismaMock.evaluatorTrial.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          moselSpec: spec,
+          answerFileName: null,
+          answerOriginalName: null,
+        }),
+      }),
+    );
+  });
+
   it('rejects a file type the evaluator does not take', async () => {
     const res = await submit({}, { submission: { name: 'notes.pdf', body: 'x' } });
 

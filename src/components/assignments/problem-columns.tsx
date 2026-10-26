@@ -12,6 +12,8 @@ import {
 import { EllipsisVertical, Pencil, Trash2, NotebookText, Eye, Download } from 'lucide-react';
 import { apiPaths } from '@/lib/api-paths';
 import { TEXT_LINK_CLASS } from '@/lib/link-styles';
+import { MoselSpecSummary } from '@/components/MoselSpecSummary';
+import { moselSpecSummary } from '@/components/MoselSpecField';
 import { cn } from '@/lib/utils';
 
 export const problemTypeLabels: Record<string, string> = {
@@ -223,6 +225,8 @@ export function buildProblemColumns(params: ProblemColumnsParams) {
           ? apiPaths.files.solution(row.original.fileName, { download: true })
           : null;
         const fileName = row.original.originalFileName || 'solution';
+        // A problem marked against its language description has no file to show.
+        const summary = moselSpecSummary(row.original.moselSpec);
         return fileUrl ? (
           <div className="flex w-full items-center justify-between gap-2">
             {/* Click the name to open the viewer; the icon downloads. */}
@@ -244,6 +248,8 @@ export function buildProblemColumns(params: ProblemColumnsParams) {
               <Download className="h-4 w-4" aria-hidden="true" />
             </a>
           </div>
+        ) : summary ? (
+          <MoselSpecSummary summary={summary} />
         ) : (
           <span className="text-muted-foreground">No file</span>
         );

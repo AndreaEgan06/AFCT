@@ -32,6 +32,8 @@ import {
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
 import { TEXT_LINK_CLASS } from '@/lib/link-styles';
+import { MoselSpecSummary } from '@/components/MoselSpecSummary';
+import { moselSpecSummary } from '@/components/MoselSpecField';
 import { cn } from '@/lib/utils';
 
 const typeLabels: Record<string, string> = {
@@ -113,7 +115,11 @@ export const useProblemColumns = ({
       cell: ({ row }) => {
         const file = row.original.originalFileName;
         const fileName = row.original.fileName;
-        if (!file || !fileName) return '—';
+        if (!file || !fileName) {
+          // A problem marked against its language description has no file to show.
+          const summary = moselSpecSummary(row.original.moselSpec);
+          return summary ? <MoselSpecSummary summary={summary} /> : '—';
+        }
         return (
           <div className="flex w-full items-center justify-between gap-2">
             {/* Click the name to open the viewer; the icon downloads. */}

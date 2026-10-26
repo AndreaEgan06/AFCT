@@ -2200,7 +2200,7 @@ export interface paths {
         get?: never;
         /**
          * Update a course problem
-         * @description Updates a problem within a course (multipart/form-data). Course staff (faculty or  TAs) or a system admin. The problem must belong to the course in the path. Sending a  new file replaces the stored solution; it's structure-validated and size-checked  first, and the previous file is removed. Omitting the file keeps the current one.
+         * @description Updates a problem within a course (multipart/form-data). Course staff (faculty or  TAs) or a system admin. The problem must belong to the course in the path. Sending a  new file replaces the stored solution; it's structure-validated and size-checked  first, and the previous file is removed. Omitting the file keeps the current one. A  problem must keep an answer key: an answer file or, for an FA problem, a MOSEL  description (or both).
          *
          *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/courses/[id]/problems/[pid]/route.ts)
          */
@@ -2257,7 +2257,7 @@ export interface paths {
         put?: never;
         /**
          * Create a problem in a course
-         * @description Creates a problem in a course from an uploaded solution file (multipart/form-data).  Course staff (faculty or TAs) or a system admin. The file's XML structure is  validated against the problem type before it's written to disk, and it's  size-checked against the system upload limit. `maxStates` applies to FA/PDA and  `isDeterministic` to FA. The course comes from the path.
+         * @description Creates a problem in a course from an uploaded solution file (multipart/form-data).  Course staff (faculty or TAs) or a system admin. The file's XML structure is  validated against the problem type before it's written to disk, and it's  size-checked against the system upload limit. `maxStates` applies to FA/PDA and  `isDeterministic` to FA. An FA problem may give a MOSEL description instead of the  file (or as well); submissions are then marked against the description. The course  comes from the path.
          *
          *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/courses/[id]/problems/route.ts)
          */
@@ -2693,7 +2693,7 @@ export interface paths {
         put?: never;
         /**
          * Start an evaluator trial
-         * @description Starts an evaluator trial: an answer file and a submitted file, queued to be run  through the real evaluator. Course staff (faculty or TAs) or a system admin.   Nothing here is graded and nothing is kept: the uploads are deleted as soon as the run  finishes and the result expires within the hour. A caller may only have one trial in  flight at a time, which is also what stops the queue filling with them.
+         * @description Starts an evaluator trial: an answer file and a submitted file, queued to be run  through the real evaluator. Course staff (faculty or TAs) or a system admin. An FA  trial may give a MOSEL description instead of the answer file, and is then marked  against it, as a problem with no answer file would be.   Nothing here is graded and nothing is kept: the uploads are deleted as soon as the run  finishes and the result expires within the hour. A caller may only have one trial in  flight at a time, which is also what stops the queue filling with them.
          *
          *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/evaluator-trials/route.ts)
          */
@@ -3252,6 +3252,90 @@ export interface paths {
          *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/me/route.ts)
          */
         post: operations["postMe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rubrics/{rid}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Duplicate a rubric
+         * @description Copies a rubric into the caller's own library, where they can change it. Anybody who can see  the rubric: this is how course staff who do not own a rubric get one they can edit.
+         *
+         *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/rubrics/[rid]/duplicate/route.ts)
+         */
+        post: operations["postRubricsByRidDuplicate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rubrics/{rid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a rubric
+         * @description One rubric, with where it is used. Its owner, a system admin, or staff of a course it is used  in. Only uses in courses the caller staffs are listed.
+         *
+         *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/rubrics/[rid]/route.ts)
+         */
+        get: operations["getRubricsByRid"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a rubric
+         * @description Deletes a rubric. Its owner or a system admin, and only while nothing uses it: detach it from  every problem first. Refusing is what keeps a deletion from quietly changing how work is  graded, the same rule the problem bank applies to a problem in use.
+         *
+         *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/rubrics/[rid]/route.ts)
+         */
+        delete: operations["deleteRubricsByRid"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a rubric
+         * @description Renames or re-describes a rubric. Its owner or a system admin.   Nothing here changes how anything is graded: there is only one kind of rubric so far, and its  definition is not editable. When definitions become editable, an edit will not regrade work  already marked, because each submission keeps a copy of the rubric it was graded under.
+         *
+         *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/rubrics/[rid]/route.ts)
+         */
+        patch: operations["patchRubricsByRid"];
+        trace?: never;
+    };
+    "/api/rubrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List rubrics
+         * @description The rubrics the caller can use. Course staff (faculty or TAs) or a system admin.   Without `courseId`: their own library, plus any rubric in use in a course they staff (which  they can see but not change). With `courseId`: what can be attached to a problem in that  course, which is their own rubrics plus those already in use there.
+         *
+         *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/rubrics/route.ts)
+         */
+        get: operations["getRubrics"];
+        put?: never;
+        /**
+         * Create a rubric
+         * @description Creates a rubric in the caller's own library. Course staff (faculty or TAs) or a system admin.   Only a name and description are taken. What a rubric does is not decided yet, so every rubric  gets the one definition there is, `{ "version": 1, "kind": "binary" }`, which grades exactly  like having no rubric.
+         *
+         *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/rubrics/route.ts)
+         */
+        post: operations["postRubrics"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8152,6 +8236,7 @@ export interface operations {
                         maxSubmissions?: number;
                         autograderEnabled?: boolean;
                         showFeedback?: boolean;
+                        rubricId?: string | null;
                         submissionCount?: number;
                     };
                 };
@@ -8214,6 +8299,8 @@ export interface operations {
                     autograderEnabled: boolean;
                     /** @description Whether students see the evaluator's feedback, or only whether they were right. Defaults to true when omitted. */
                     showFeedback?: boolean;
+                    /** @description The rubric that grades this problem here; null for none. Left unchanged when omitted. Must be the caller's own rubric or one already used in this course. */
+                    rubricId?: string | null;
                 };
             };
         };
@@ -8225,7 +8312,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Invalid JSON or settings. */
+            /** @description Invalid JSON or settings, or a rubric the caller cannot attach. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10695,6 +10782,8 @@ export interface operations {
                     maxStates?: string;
                     /** @enum {string} */
                     isDeterministic?: "true" | "false";
+                    /** @description FA only: the MOSEL description (JSON). Omit to keep it, send blank to remove it. */
+                    moselSpec?: string;
                     /**
                      * Format: binary
                      * @description Optional new solution file
@@ -10711,7 +10800,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Missing fields or the new file failed structure validation. */
+            /** @description Missing fields, no answer key left, or the new file failed structure validation. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10972,11 +11061,13 @@ export interface operations {
                      * @enum {string}
                      */
                     isDeterministic?: "true" | "false";
+                    /** @description FA only: the target language as a MOSEL description (JSON). Without a file, submissions are marked against it; with one, the file decides and the description is analysed against submissions. */
+                    moselSpec?: string;
                     /**
                      * Format: binary
-                     * @description Solution definition (XML)
+                     * @description Solution definition (XML). Required unless an FA problem gives moselSpec.
                      */
-                    file: string;
+                    file?: string;
                 };
             };
         };
@@ -10988,7 +11079,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Missing fields or the solution file failed structure validation. */
+            /** @description Missing fields, no answer key, or the solution file failed structure validation. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12586,8 +12677,15 @@ export interface operations {
                      * @enum {string}
                      */
                     isDeterministic?: "true" | "false";
-                    /** Format: binary */
-                    answerFile: string;
+                    /** @description FA only: a MOSEL description (JSON). Without an answer file the submission is marked against it; with one it is analysed against it. */
+                    moselSpec?: string;
+                    /** @description Optional: a rubric to score the run with. */
+                    rubricId?: string;
+                    /**
+                     * Format: binary
+                     * @description Required unless an FA trial gives moselSpec.
+                     */
+                    answerFile?: string;
                     /** Format: binary */
                     submissionFile: string;
                 };
@@ -12601,7 +12699,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Missing files, or a file failed structure validation. */
+            /** @description Missing files, a file failed structure validation, or an unknown rubric. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14033,6 +14131,373 @@ export interface operations {
                 };
             };
             /** @description Update failed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postRubricsByRidDuplicate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The copy. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not signed in. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Caller is not course staff or a system admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such rubric, or the caller cannot see it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Server error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRubricsByRid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rubric, with `usage`: the problems on assignments it grades. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not signed in. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Caller is not course staff or a system admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such rubric, or the caller cannot see it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Server error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteRubricsByRid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not signed in. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller can see the rubric but does not own it. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such rubric, or the caller cannot see it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The rubric is still attached to at least one problem. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Server error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patchRubricsByRid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    description?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The updated rubric. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid body. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not signed in. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller can see the rubric but does not own it. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such rubric, or the caller cannot see it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Server error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRubrics: {
+        parameters: {
+            query?: {
+                /** @description Only rubrics that can be attached in this course. */
+                courseId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rubrics, newest first, as { rubrics: [...] }. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not signed in. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Caller is not course staff or a system admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The course does not exist or the caller does not manage it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Server error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postRubrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    description?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The new rubric. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid body. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not signed in. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Caller is not course staff or a system admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Server error. */
             500: {
                 headers: {
                     [name: string]: unknown;

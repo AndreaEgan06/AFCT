@@ -113,3 +113,20 @@ export function discloseGradeFeedback(
 
 /** What a student reads where the feedback would have been. */
 export const FEEDBACK_WITHHELD_MESSAGE = 'Feedback is not shown for this problem.';
+
+/**
+ * The evaluator's raw output as this reader should receive it.
+ *
+ * For a finite automaton problem with a MOSEL description, the raw output carries `analysis`: a
+ * state-by-state account of what the student's automaton gets wrong. Students are not shown it
+ * (they get the witness string, under the rules above, and nothing more), so it is removed for
+ * anybody who is not staff. Everything else passes through as it always has.
+ */
+export function discloseEvaluationRaw(raw: unknown, opts: { isStaff: boolean }): unknown {
+  if (raw == null) return null;
+  if (opts.isStaff || typeof raw !== 'object' || Array.isArray(raw) || !('analysis' in raw)) {
+    return raw;
+  }
+  const { analysis: _analysis, ...rest } = raw as Record<string, unknown>;
+  return rest;
+}

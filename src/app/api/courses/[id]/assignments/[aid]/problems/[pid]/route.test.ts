@@ -22,6 +22,8 @@ const prismaMock = vi.hoisted(() => ({
   submission: {
     count: vi.fn(),
   },
+  // RUBRIC: whether a rubric may be attached is a lookup scoped to what the caller can use.
+  rubric: { findFirst: vi.fn() },
 }));
 
 const authMock = vi.hoisted(() => vi.fn());
@@ -193,7 +195,65 @@ describe('PUT /api/courses/[id]/[aid]/problems/[pid]', () => {
         maxSubmissions: true,
         autograderEnabled: true,
         showFeedback: true,
+        rubricId: true,
       },
+    });
+  });
+
+  // RUBRIC: attaching and detaching a rubric through the settings.
+  describe('the rubric', () => {
+    const put = (body: Record<string, unknown>) =>
+      PUT(
+        new Request('http://localhost/api/courses/c1/assignments/a1/problems/p1', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ maxPoints: 10, maxSubmissions: 1, autograderEnabled: true, ...body }),
+        }),
+        { params: Promise.resolve({ id: 'c1', aid: 'a1', pid: 'p1' }) },
+      );
+    const sentData = () =>
+      (prismaMock.assignmentProblem.update.mock.calls[0]![0] as { data: Record<string, unknown> })
+        .data;
+
+    it('attaches one the caller can use', async () => {
+      prismaMock.rubric.findFirst.mockResolvedValue({ id: 'r1' });
+
+      const res = await put({ rubricId: 'r1' });
+
+      expect(res.status).toBe(200);
+      expect(sentData().rubricId).toBe('r1');
+    });
+
+    it('refuses one the caller cannot use, without saying whether it exists', async () => {
+      prismaMock.rubric.findFirst.mockResolvedValue(null);
+
+      const res = await put({ rubricId: 'someone-elses' });
+
+      expect(res.status).toBe(400);
+      expect(prismaMock.assignmentProblem.update).not.toHaveBeenCalled();
+    });
+
+    it('needs no check to keep the one already attached', async () => {
+      prismaMock.assignmentProblem.findUnique.mockResolvedValue({
+        assignment: { courseId: 'c1' },
+        problem: { title: 'Problem 1' },
+        maxPoints: 10,
+        rubricId: 'r1',
+      });
+
+      const res = await put({ rubricId: 'r1' });
+
+      expect(res.status).toBe(200);
+      expect(prismaMock.rubric.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('detaches it with null, and leaves it alone when omitted', async () => {
+      await put({ rubricId: null });
+      expect(sentData().rubricId).toBeNull();
+
+      prismaMock.assignmentProblem.update.mockClear();
+      await put({});
+      expect(sentData()).not.toHaveProperty('rubricId');
     });
   });
 

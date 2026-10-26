@@ -181,6 +181,8 @@ export const POST = withAssignmentAuth(
               // Same reason as the copied-problem path: the column defaults to true, so a
               // duplicate that omits it silently shows feedback the original withheld.
               showFeedback: l.showFeedback,
+              // RUBRIC: by reference; the rubric is the instructor's, not the assignment's.
+              rubricId: l.rubricId,
             })),
           });
         } else if (problemMode === 'duplicate') {

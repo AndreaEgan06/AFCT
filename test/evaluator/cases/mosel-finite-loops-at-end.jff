@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><!--Created by hand for the MOSEL golden cases: a, ab and ba, but the last state loops, so it also accepts abb, baa, ...--><structure>
+	<type>fa</type>
+	<automaton>
+		<state id="0" name="start">
+			<x>100.0</x>
+			<y>100.0</y>
+			<initial/>
+		</state>
+		<state id="1" name="a">
+			<x>220.0</x>
+			<y>100.0</y>
+			<final/>
+		</state>
+		<state id="2" name="b">
+			<x>340.0</x>
+			<y>100.0</y>
+		</state>
+		<state id="3" name="done">
+			<x>460.0</x>
+			<y>100.0</y>
+			<final/>
+		</state>
+		<state id="4" name="dead">
+			<x>580.0</x>
+			<y>100.0</y>
+		</state>
+		<transition>
+			<from>0</from>
+			<to>1</to>
+			<read>a</read>
+		</transition>
+		<transition>
+			<from>0</from>
+			<to>2</to>
+			<read>b</read>
+		</transition>
+		<transition>
+			<from>1</from>
+			<to>4</to>
+			<read>a</read>
+		</transition>
+		<transition>
+			<from>1</from>
+			<to>3</to>
+			<read>b</read>
+		</transition>
+		<transition>
+			<from>2</from>
+			<to>3</to>
+			<read>a</read>
+		</transition>
+		<transition>
+			<from>2</from>
+			<to>4</to>
+			<read>b</read>
+		</transition>
+		<transition>
+			<from>3</from>
+			<to>3</to>
+			<read>a</read>
+		</transition>
+		<transition>
+			<from>3</from>
+			<to>3</to>
+			<read>b</read>
+		</transition>
+		<transition>
+			<from>4</from>
+			<to>4</to>
+			<read>a</read>
+		</transition>
+		<transition>
+			<from>4</from>
+			<to>4</to>
+			<read>b</read>
+		</transition>
+	</automaton>
+</structure>

@@ -14,7 +14,11 @@ const getEvaluatorConfigMock = vi.hoisted(() => vi.fn());
 const existsSyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
-vi.mock('./evaluator-runner', () => ({ runEvaluatorJar: runEvaluatorJarMock }));
+vi.mock('./evaluator-runner', async (importOriginal) => ({
+  // The real config builder: what it decides to send is part of what is under test.
+  ...(await importOriginal<typeof import('./evaluator-runner')>()),
+  runEvaluatorJar: runEvaluatorJarMock,
+}));
 vi.mock('./eval-config', () => ({ getEvaluatorConfig: getEvaluatorConfigMock }));
 vi.mock('./activity-log-utils', () => ({ createEnhancedActivityLog: activityLogMock }));
 vi.mock('fs', () => ({ default: { existsSync: existsSyncMock }, existsSync: existsSyncMock }));
@@ -23,6 +27,7 @@ import { claimAndRunTrial, reapStuckTrials } from './trial-runner';
 
 const TRIAL = {
   answerFileName: 'a.jff',
+  answerOriginalName: 'answer.jff',
   submissionFileName: 's.jff',
   problemType: 'FA' as const,
   maxStates: 5,
@@ -97,6 +102,40 @@ describe('claimAndRunTrial', () => {
     );
   });
 
+  it('sends no grading config when the trial has no description or rubric', async () => {
+    await claimAndRunTrial(5);
+
+    expect(runEvaluatorJarMock).toHaveBeenCalledWith(expect.objectContaining({ grading: null }));
+  });
+
+  // RUBRIC: a trial's rubric and description reach the jar, and the score is kept.
+  it('sends the description and rubric it was started with, and records the score', async () => {
+    const spec = { alphabet: ['a', 'b'], condition: { kind: 'endWt', w: 'ab' } };
+    const rubric = { version: 1, kind: 'binary' };
+    prismaMock.evaluatorTrial.findUnique.mockResolvedValue({
+      ...TRIAL,
+      moselSpec: spec,
+      rubricDefinition: rubric,
+    });
+    runEvaluatorJarMock.mockResolvedValue({
+      outcome: 'ok',
+      evaluation: { correct: false, feedback: 'No', score: 0 },
+      correct: false,
+      feedback: 'No',
+      score: 0,
+      stdout: '{}',
+      stderr: '',
+      durationMs: 10,
+    });
+
+    await claimAndRunTrial(5);
+
+    expect(runEvaluatorJarMock).toHaveBeenCalledWith(
+      expect.objectContaining({ grading: { mosel: spec, rubric } }),
+    );
+    expect(finishData()).toMatchObject({ state: 'COMPLETED', score: 0 });
+  });
+
   it('records a verdict, and fences the write on still holding the claim', async () => {
     await claimAndRunTrial(5);
 
@@ -143,6 +182,32 @@ describe('claimAndRunTrial', () => {
 
     expect(finishData()).toMatchObject({ state: 'FAILED' });
     expect(String(finishData().feedback)).toContain('Evaluation timed out');
+  });
+
+  it('marks a trial with no answer file against its description', async () => {
+    const spec = { alphabet: ['0', '1'], condition: { kind: 'count', w: '10', cmp: '=', n: 0 } };
+    prismaMock.evaluatorTrial.findUnique.mockResolvedValue({
+      ...TRIAL,
+      answerFileName: null,
+      answerOriginalName: null,
+      moselSpec: spec,
+    });
+
+    await claimAndRunTrial(5);
+
+    expect(runEvaluatorJarMock).toHaveBeenCalledWith(
+      expect.objectContaining({ answerFilePath: null, grading: { mosel: spec } }),
+    );
+    expect(finishData()).toMatchObject({ state: 'COMPLETED' });
+  });
+
+  it('fails a trial whose answer file has been swept, rather than marking it without one', async () => {
+    prismaMock.evaluatorTrial.findUnique.mockResolvedValue({ ...TRIAL, answerFileName: null });
+
+    await claimAndRunTrial(5);
+
+    expect(runEvaluatorJarMock).not.toHaveBeenCalled();
+    expect(String(finishData().feedback)).toContain('no longer available');
   });
 
   it('fails the trial when its uploads have already been swept', async () => {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { formBooleanOptional, formIntOptional } from './fields';
 import { richDescriptionEnvelopeSchema } from '@/lib/rich-description';
+import { moselSpecFormField } from './mosel';
 
 // Optional versioned rich-description envelope accepted by the write APIs. When present it is
 // authoritative and the server derives the plain-text `description` from it.
@@ -39,14 +40,17 @@ export const isAllowedProblemExtension = (fileName: string): boolean => {
   return (ALLOWED_PROBLEM_EXTENSIONS as readonly string[]).includes(ext);
 };
 
-// Required solution-file upload (used by the client CreateProblemSchema). `File`
+// The solution-file upload on create (used by the client CreateProblemSchema). Optional,
+// because a finite automaton problem can be defined by a MOSEL description instead; the
+// create dialog, which holds the description, decides whether one of the two is there. `File`
 // is a global in both the browser and Node 22, so no environment guard is needed.
-const FileRequired = z
+const FileUpload = z
   .instanceof(File, { message: 'Answer file is required.' })
   .refine((f) => f.size > 0, 'Answer file is required.')
   .refine((f) => isAllowedProblemExtension(f.name), {
     message: `Allowed: .${ALLOWED_PROBLEM_EXTENSIONS.join(', .')}`,
-  });
+  })
+  .optional();
 // No size limit here on purpose: the cap is the admin's `maxUploadSizeMb` setting, which a
 // schema built at module load cannot see. This used to hardcode 5MB while the upload input
 // beside it and the route behind it both used the configured value, so raising the setting
@@ -133,10 +137,10 @@ function addProblemValidation<T extends z.ZodRawShape>(schema: z.ZodObject<T>) {
 /** Form-only schema (used by dialogs). */
 export const ProblemFormSchema = addProblemValidation(BaseProblemObject);
 
-/** CREATE: requires file and adds the same FA/PDA rules */
+/** CREATE: checks the file, when there is one, and adds the same FA/PDA rules */
 export const CreateProblemSchema = addProblemValidation(
   BaseProblemObject.extend({
-    file: FileRequired,
+    file: FileUpload,
   })
 );
 
@@ -168,6 +172,9 @@ const problemApiScalars = {
   assignmentId: z.string().trim().optional(),
   maxStates: formIntOptional(),
   isDeterministic: formBooleanOptional,
+  // FA only: the target language as a MOSEL description (JSON, see ./mosel). Absent leaves it
+  // as it is; blank removes it. A problem needs an answer file, this, or both.
+  moselSpec: moselSpecFormField,
 };
 
 export const ProblemCreateApiSchema = z.object(problemApiScalars);
@@ -247,6 +254,11 @@ export const AssignmentProblemSettingsSchema = z.object({
     }),
   autograderEnabled: z.boolean(),
   showFeedback: z.boolean().default(true),
+  /**
+   * RUBRIC: the rubric that grades this problem here. Null removes it (full points when correct,
+   * nothing otherwise); absent leaves it as it is, so an older caller cannot clear it by omission.
+   */
+  rubricId: z.string().trim().min(1).nullable().optional(),
 });
 
 export type AssignmentProblemSettingsInput = z.infer<typeof AssignmentProblemSettingsSchema>;

@@ -180,6 +180,11 @@ export const queryKeys = {
   // --- Evaluator trials (staff dry runs) -----------------------------------
   evaluatorTrial: (id: string) => ['evaluator-trial', id] as const,
 
+  // --- Rubrics (an instructor's library) --------------------------------------
+  // RUBRIC: see RUBRIC_LOCATIONS.md.
+  rubrics: () => ['rubrics'] as const,
+  rubric: (id: string) => ['rubrics', id] as const,
+
   // --- Public / self -------------------------------------------------------
   systemSettingsPublic: () => ['system-settings', 'public'] as const,
   /** The signed-in account's own record. Predates the `me` group below; left where it is

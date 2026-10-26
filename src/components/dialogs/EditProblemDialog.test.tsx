@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import type { Problem } from '@prisma/client';
@@ -107,8 +107,8 @@ const baseProblem = {
   type: 'FA',
   maxStates: 5,
   isDeterministic: true,
-  fileName: null,
-  originalFileName: null,
+  fileName: 'stored-answer.jff',
+  originalFileName: 'answer.jff',
   courseId: 'course-1',
   createdAt: new Date('2025-01-01T00:00:00Z'),
   updatedAt: new Date('2025-01-02T00:00:00Z'),
@@ -164,7 +164,7 @@ describe('EditProblemDialog (bank wizard)', () => {
     renderDialog();
 
     await clickNext(user); // -> Type
-    await clickNext(user); // -> Answer File
+    await clickNext(user); // -> Answer
 
     const fileInput = document.getElementById('answer-file') as HTMLInputElement;
     await user.upload(fileInput, file);
@@ -181,7 +181,7 @@ describe('EditProblemDialog (bank wizard)', () => {
     // Step 1: Details (title prefilled from the problem).
     expect(screen.getByLabelText('Title')).toHaveValue('Sample Problem');
     await clickNext(user); // -> Type
-    await clickNext(user); // -> Answer File
+    await clickNext(user); // -> Answer
     await clickNext(user); // -> Review
 
     const saveButton = screen.getByRole('button', { name: /save changes/i });
@@ -205,5 +205,28 @@ describe('EditProblemDialog (bank wizard)', () => {
     expect(toastMock.updated).toHaveBeenCalledWith('Problem', { name: 'Sample Problem' });
     expect(setOpen).toHaveBeenCalledWith(false);
     expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ id: 'problem-1' }));
+  });
+  it('keeps a problem with no answer file from losing its description', async () => {
+    const user = userEvent.setup();
+    renderDialog({
+      problem: {
+        ...baseProblem,
+        fileName: null,
+        originalFileName: null,
+        moselSpec: { alphabet: ['0', '1'], condition: { kind: 'count', w: '10', cmp: '=', n: 0 } },
+      } as unknown as Problem,
+    });
+
+    await clickNext(user); // -> Type
+    await clickNext(user); // -> Answer
+    expect(screen.getByLabelText('Alphabet')).toHaveValue('0, 1');
+    expect(screen.getByLabelText('Condition')).toHaveValue("|indOf '10'| = 0");
+    const next = screen.getByRole('button', { name: 'Next' });
+    expect(next).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText('Alphabet'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Condition'), { target: { value: '' } });
+    expect(screen.getByText(/needs a language description/)).toBeInTheDocument();
+    expect(next).toBeDisabled();
   });
 });

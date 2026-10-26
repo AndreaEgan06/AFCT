@@ -114,6 +114,57 @@ describe('POST /api/courses/[id]/problems', () => {
     );
   });
 
+  describe('the MOSEL description', () => {
+    const spec = { alphabet: ['0', '1'], condition: { kind: 'endWt', w: '01' } };
+
+    it('is stored on an FA problem', async () => {
+      const res = await upload({ moselSpec: JSON.stringify(spec) });
+
+      expect(res.status).toBe(201);
+      expect(prismaMock.problem.create.mock.calls[0]![0].data.moselSpec).toEqual(spec);
+    });
+
+    it('is ignored on any other type', async () => {
+      await upload({ type: 'RE', moselSpec: JSON.stringify(spec) });
+
+      expect(prismaMock.problem.create.mock.calls[0]![0].data).not.toHaveProperty('moselSpec');
+    });
+
+    it('can define an FA problem without an answer file', async () => {
+      const res = await upload({ moselSpec: JSON.stringify(spec) }, null);
+
+      expect(res.status).toBe(201);
+      expect(writeFileMock).not.toHaveBeenCalled();
+      const data = prismaMock.problem.create.mock.calls[0]![0].data;
+      expect(data.moselSpec).toEqual(spec);
+      expect(data.fileName).toBeNull();
+      expect(data.originalFileName).toBeNull();
+      expect(data.answerContentHash).toBeNull();
+    });
+
+    it('cannot stand in for the answer file on any other type', async () => {
+      const res = await upload({ type: 'RE', moselSpec: JSON.stringify(spec) }, null);
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'Answer file is required.' });
+      expect(prismaMock.problem.create).not.toHaveBeenCalled();
+    });
+
+    it('is refused without an alphabet', async () => {
+      const res = await upload({ moselSpec: JSON.stringify({ condition: spec.condition }) });
+
+      expect(res.status).toBe(400);
+      expect(writeFileMock).not.toHaveBeenCalled();
+    });
+
+    it('is refused when malformed, before anything is written', async () => {
+      const res = await upload({ moselSpec: JSON.stringify({ condition: {} }) });
+
+      expect(res.status).toBe(400);
+      expect(writeFileMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('never writes to a path built from the uploaded name', async () => {
     await upload({}, { name: '../../../../etc/passwd.jff', body: '<structure/>' });
 
@@ -138,11 +189,13 @@ describe('POST /api/courses/[id]/problems', () => {
     });
   });
 
-  it('rejects a request with no file', async () => {
+  it('rejects a request with neither a file nor a description', async () => {
     const res = await upload({}, null);
 
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: 'Missing required fields' });
+    expect(await res.json()).toEqual({
+      error: 'Give an answer file, a language description, or both.',
+    });
     expect(writeFileMock).not.toHaveBeenCalled();
     expect(prismaMock.problem.create).not.toHaveBeenCalled();
   });

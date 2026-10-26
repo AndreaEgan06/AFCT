@@ -595,6 +595,25 @@ export const runDevelopmentSeed = async (prisma: PrismaClient) => {
     console.log(
       `[seed] development: created ${createdAssignmentProblems.count} assignment-problem relationships`,
     );
+
+    // RUBRIC: one example in the marked faculty member's library, attached to nothing, so the
+    // Rubrics page and the picker have something to show. Binary, like every rubric for now.
+    if (charles?.id) {
+      const existing = await prisma.rubric.findFirst({
+        where: { ownerId: charles.id, name: 'Correct or incorrect' },
+        select: { id: true },
+      });
+      if (!existing) {
+        await prisma.rubric.create({
+          data: {
+            name: 'Correct or incorrect',
+            description: 'Full points when the answer is correct, nothing otherwise.',
+            definition: { version: 1, kind: 'binary' },
+            ownerId: charles.id,
+          },
+        });
+      }
+    }
   } catch (error) {
     console.error('[seed] development: error assigning problems to assignments', error);
     throw error;

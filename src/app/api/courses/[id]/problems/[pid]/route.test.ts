@@ -452,7 +452,7 @@ describe('PUT /api/courses/[id]/problems/[pid]', () => {
   it('returns 500 and logs when the update throws (non-FA type, no maxPoints)', async () => {
     authMock.mockResolvedValue({ user: { id: 'u1', role: 'FACULTY' } });
     prismaMock.roster.findFirst.mockResolvedValue({ role: 'FACULTY' });
-    prismaMock.problem.findFirst.mockResolvedValue({ id: 'p1', fileName: null });
+    prismaMock.problem.findFirst.mockResolvedValue({ id: 'p1', type: 'RE', fileName: 'old.jff' });
     prismaMock.problem.update.mockRejectedValue(new Error('db down'));
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -471,6 +471,49 @@ describe('PUT /api/courses/[id]/problems/[pid]', () => {
         problemId: 'p1',
       }),
     );
+  });
+
+  describe('a problem defined by its language description alone', () => {
+    const spec = { alphabet: ['0', '1'], condition: { kind: 'count', w: '10', cmp: '=', n: 0 } };
+    const specOnly = {
+      id: 'p1',
+      type: 'FA',
+      fileName: null,
+      originalFileName: null,
+      moselSpec: spec,
+    };
+
+    beforeEach(() => {
+      authMock.mockResolvedValue({ user: { id: 'u1', role: 'FACULTY' } });
+      prismaMock.roster.findFirst.mockResolvedValue({ role: 'FACULTY' });
+      prismaMock.problem.findFirst.mockResolvedValue(specOnly);
+      prismaMock.problem.update.mockResolvedValue({ ...specOnly, title: 'Updated' });
+    });
+
+    it('can be edited while it keeps the description', async () => {
+      const res = await PUT(putReq({ title: 'Updated', type: 'FA' }), params());
+
+      expect(res.status).toBe(200);
+      expect(prismaMock.problem.update.mock.calls[0]![0].data).not.toHaveProperty('moselSpec');
+    });
+
+    it('cannot lose the description without gaining a file', async () => {
+      const res = await PUT(putReq({ title: 'Updated', type: 'FA', moselSpec: '' }), params());
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'Give an answer file, a language description, or both.',
+      });
+      expect(prismaMock.problem.update).not.toHaveBeenCalled();
+    });
+
+    it('cannot become another type without a file', async () => {
+      const res = await PUT(putReq({ title: 'Updated', type: 'RE' }), params());
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'Answer file is required.' });
+      expect(prismaMock.problem.update).not.toHaveBeenCalled();
+    });
   });
 
   it('returns 409 when the course is archived', async () => {

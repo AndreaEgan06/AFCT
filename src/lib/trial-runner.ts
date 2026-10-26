@@ -9,7 +9,7 @@ import fs from 'fs';
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
 import { getEvaluatorConfig, type EvaluatorConfig } from './eval-config';
-import { runEvaluatorJar } from './evaluator-runner';
+import { buildGradingConfig, runEvaluatorJar } from './evaluator-runner';
 import { TRIALS_DIR, trialConcurrencyLimit } from './evaluator-trials';
 import { resolveInsideDir } from './safe-upload';
 import { errMessage } from './errors';
@@ -102,10 +102,14 @@ async function runTrial(id: string, config: EvaluatorConfig): Promise<void> {
       where: { id },
       select: {
         answerFileName: true,
+        answerOriginalName: true,
         submissionFileName: true,
         problemType: true,
         maxStates: true,
         isDeterministic: true,
+        moselSpec: true,
+        // RUBRIC: the definition copied onto the trial when it was started.
+        rubricDefinition: true,
       },
     });
 
@@ -114,7 +118,10 @@ async function runTrial(id: string, config: EvaluatorConfig): Promise<void> {
       return;
     }
 
-    if (!trial.answerFileName || !trial.submissionFileName) {
+    // A trial with no answer name never had an answer file: it is marked against its
+    // description. One that had a file and has lost it cannot run.
+    const hadAnswerFile = trial.answerOriginalName !== null;
+    if ((hadAnswerFile && !trial.answerFileName) || !trial.submissionFileName) {
       await finishTrial(id, {
         state: 'FAILED',
         feedback: 'The uploaded files are no longer available. Upload them again.',
@@ -122,9 +129,11 @@ async function runTrial(id: string, config: EvaluatorConfig): Promise<void> {
       return;
     }
 
-    const answerFilePath = resolveInsideDir(TRIALS_DIR, trial.answerFileName);
+    const answerFilePath = trial.answerFileName
+      ? resolveInsideDir(TRIALS_DIR, trial.answerFileName)
+      : null;
     const uploadedFilePath = resolveInsideDir(TRIALS_DIR, trial.submissionFileName);
-    if (!fs.existsSync(answerFilePath) || !fs.existsSync(uploadedFilePath)) {
+    if ((answerFilePath && !fs.existsSync(answerFilePath)) || !fs.existsSync(uploadedFilePath)) {
       await finishTrial(id, {
         state: 'FAILED',
         feedback: 'The uploaded files are no longer available. Upload them again.',
@@ -141,6 +150,11 @@ async function runTrial(id: string, config: EvaluatorConfig): Promise<void> {
         maxStates: trial.maxStates,
         isDeterministic: trial.isDeterministic,
       },
+      grading: buildGradingConfig({
+        type: trial.problemType,
+        moselSpec: trial.moselSpec,
+        rubricDefinition: trial.rubricDefinition,
+      }),
     });
 
     // stderr is kept whatever the outcome: on the trial page it is a diagnostic the
@@ -154,6 +168,8 @@ async function runTrial(id: string, config: EvaluatorConfig): Promise<void> {
         correct: run.correct ?? null,
         feedback: run.feedback,
         evaluationRaw: run.evaluation as Prisma.InputJsonValue,
+        // RUBRIC: the score, when the trial ran with a rubric.
+        score: run.score ?? null,
       });
       return;
     }

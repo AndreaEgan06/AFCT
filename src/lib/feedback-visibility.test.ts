@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  discloseEvaluationRaw,
   discloseGradeFeedback,
   discloseSubmissionFeedback,
   feedbackVisibilityMap,
@@ -120,5 +121,27 @@ describe('a grade row, as a student reads it', () => {
 
   it('shows the autograder copy when the problem shows feedback', () => {
     expect(discloseGradeFeedback(gradeRow(), shown, asStudent).feedbackVisible).toBe(true);
+  });
+});
+
+describe('the raw evaluator output', () => {
+  const raw = { feedback: 'The string "ab" SHOULD be accepted.', correct: false, analysis: { counts: {} } };
+
+  it('drops the MOSEL analysis for a student', () => {
+    expect(discloseEvaluationRaw(raw, { isStaff: false })).toEqual({
+      feedback: raw.feedback,
+      correct: false,
+    });
+  });
+
+  it('keeps it for staff', () => {
+    expect(discloseEvaluationRaw(raw, { isStaff: true })).toBe(raw);
+  });
+
+  it('passes through output with no analysis, and anything that is not an object', () => {
+    const plain = { feedback: 'ok', correct: true };
+    expect(discloseEvaluationRaw(plain, { isStaff: false })).toBe(plain);
+    expect(discloseEvaluationRaw('crashed', { isStaff: false })).toBe('crashed');
+    expect(discloseEvaluationRaw(undefined, { isStaff: false })).toBeNull();
   });
 });

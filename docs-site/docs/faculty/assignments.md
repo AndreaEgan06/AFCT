@@ -108,6 +108,9 @@ the bank. Open a problem's settings to change them:
 - **Automatically Graded**: whether submissions go to the autograder. When it is on, a
   submission the autograder marks correct is awarded the maximum points automatically, and one
   it marks incorrect is recorded as **zero** rather than left ungraded.
+<!-- RUBRIC: describes the binary-only placeholder. -->
+- **Rubric**: how an evaluated attempt becomes points. **None** gives full points when correct
+  and nothing otherwise, and so, for now, does every rubric; see [Rubrics](rubrics.md).
 - **Show Feedback to Students**: whether students read what the evaluator said, or only whether
   their answer was right. This changes what they are shown and nothing else. The feedback is
   still produced, still recorded against the attempt, and still there for you and your TAs on

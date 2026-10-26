@@ -3,7 +3,11 @@ import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
 import { createEnhancedActivityLog } from '@/lib/activity-log-utils';
 import { canManageCourse } from '@/lib/permissions';
-import { discloseSubmissionFeedback, feedbackVisibilityMap } from '@/lib/feedback-visibility';
+import {
+  discloseSubmissionFeedback,
+  feedbackVisibilityMap,
+  discloseEvaluationRaw,
+} from '@/lib/feedback-visibility';
 import { withCourseAuth } from '@/lib/api/with-auth';
 import { logDenial } from '@/lib/api/activity';
 import { resolveStudentSubmissionGroupId } from '@/lib/assignment-groups';
@@ -230,7 +234,8 @@ export const GET = withCourseAuth(
             submittedAt: s.submittedAt,
             ...discloseSubmissionFeedback(s, visibility, { isStaff }),
             correct: s.correct,
-            evaluationRaw: s.evaluationRaw ?? null,
+            // The MOSEL analysis inside it is staff-only.
+            evaluationRaw: discloseEvaluationRaw(s.evaluationRaw, { isStaff }),
             fileName: s.fileName,
             originalFileName: s.originalFileName,
           })),

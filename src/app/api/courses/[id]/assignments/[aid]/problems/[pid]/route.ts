@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { createEnhancedActivityLog } from '@/lib/activity-log-utils';
 import { withCourseAuth } from '@/lib/api/with-auth';
 import { diffFields, logError } from '@/lib/api/activity';
+import { canAttachRubric } from '@/lib/rubrics';
 import {
   AssignmentProblemSettingsSchema,
   type AssignmentProblemSettingsInput,
@@ -41,9 +42,10 @@ class MaxPointsBelowGradesError extends Error {}
  *           maxSubmissions: { type: integer, description: "-1 for unlimited, else >= 1" }
  *           autograderEnabled: { type: boolean }
  *           showFeedback: { type: boolean, description: "Whether students see the evaluator's feedback, or only whether they were right. Defaults to true when omitted." }
+ *           rubricId: { type: string, nullable: true, description: "The rubric that grades this problem here; null for none. Left unchanged when omitted. Must be the caller's own rubric or one already used in this course." }
  * responses:
  *   200: { description: The updated assignment-problem settings. }
- *   400: { description: Invalid JSON or settings. }
+ *   400: { description: "Invalid JSON or settings, or a rubric the caller cannot attach." }
  *   401: { description: Not signed in. }
  *   403: { description: Caller is not course staff (faculty or TA) or a system admin. }
  *   404: { description: The problem isn't linked to this assignment/course. }
@@ -94,6 +96,17 @@ export const PUT = withCourseAuth(
         return NextResponse.json({ error: 'Assignment problem link not found.' }, { status: 404 });
       }
 
+      // RUBRIC: attaching one. Only a rubric that is the caller's, or already used in this
+      // course, can be attached: anything else would be reaching into another instructor's
+      // library. Keeping the one already attached needs no check.
+      if (
+        payload.rubricId &&
+        payload.rubricId !== link.rubricId &&
+        !(await canAttachRubric(user, payload.rubricId, courseId))
+      ) {
+        return NextResponse.json({ error: 'Rubric not found.' }, { status: 400 });
+      }
+
       /**
        * Lowering the points has to answer for the marks already given.
        *
@@ -140,6 +153,7 @@ export const PUT = withCourseAuth(
               maxSubmissions: true,
               autograderEnabled: true,
               showFeedback: true,
+              rubricId: true,
             },
           });
         })
@@ -176,12 +190,13 @@ export const PUT = withCourseAuth(
             changes: diffFields(
               link as unknown as Record<string, unknown>,
               updated as unknown as Record<string, unknown>,
-              ['maxPoints', 'maxSubmissions', 'autograderEnabled', 'showFeedback'],
+              ['maxPoints', 'maxSubmissions', 'autograderEnabled', 'showFeedback', 'rubricId'],
             ),
             maxPoints: payload.maxPoints,
             maxSubmissions: payload.maxSubmissions,
             autograderEnabled: payload.autograderEnabled,
             showFeedback: payload.showFeedback,
+            rubricId: updated.rubricId,
             problemTitle: link.problem.title,
           },
         });
@@ -240,6 +255,7 @@ export const PUT = withCourseAuth(
  *             maxSubmissions: { type: integer }
  *             autograderEnabled: { type: boolean }
  *             showFeedback: { type: boolean }
+ *             rubricId: { type: string, nullable: true }
  *             submissionCount: { type: integer }
  *   401: { description: Not signed in. }
  *   403: { description: Caller is not course staff (faculty or TA) or a system admin. }
@@ -265,6 +281,8 @@ export const GET = withCourseAuth(
         maxSubmissions: true,
         autograderEnabled: true,
         showFeedback: true,
+        // RUBRIC: shown in the settings dialog's picker.
+        rubricId: true,
       },
     });
 

@@ -413,6 +413,320 @@
       "maxStates": 2,
       "expectCorrect": false,
       "expectErrorContains": "the maximum allowed is"
+    },
+    {
+      "name": "Grading config: a correct DFA scores 1 under the binary rubric, with a consistent analysis",
+      "type": "FA",
+      "answer": "mosel-endswith-ab-solution.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["a", "b"],
+          "condition": {
+            "kind": "endWt",
+            "w": "ab"
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "submission": "mosel-endswith-ab-solution.jff",
+      "expectCorrect": true,
+      "expectScore": 1.0,
+      "expectConflictedStates": 0
+    },
+    {
+      "name": "Grading config: merging two states is a conflict, and the binary rubric scores 0",
+      "type": "FA",
+      "answer": "mosel-endswith-ab-solution.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["a", "b"],
+          "condition": {
+            "kind": "endWt",
+            "w": "ab"
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "submission": "mosel-endswith-ab-merged.jff",
+      "expectCorrect": false,
+      "expectScore": 0.0,
+      "expectConflictedStates": 1
+    },
+    {
+      "name": "Grading config: a missing transition reaches a trap state the analysis flags",
+      "type": "FA",
+      "answer": "mosel-endswith-ab-solution.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["a", "b"],
+          "condition": {
+            "kind": "endWt",
+            "w": "ab"
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "submission": "mosel-endswith-ab-incomplete.jff",
+      "expectCorrect": false,
+      "expectScore": 0.0,
+      "expectConflictedStates": 1
+    },
+    {
+      "name": "Grading config: a binary number divisible by 3 (intBase(2) % 3 = 0) is fully consistent",
+      "type": "FA",
+      "answer": "mosel-binary-mod3-solution.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["0", "1"],
+          "condition": {
+            "kind": "valueMod",
+            "base": 2,
+            "m": 3,
+            "cmp": "=",
+            "r": 0
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "submission": "mosel-binary-mod3-solution.jff",
+      "expectCorrect": true,
+      "expectScore": 1.0,
+      "expectAnalysis": {
+        "specMatchesAnswerKey": true,
+        "nondeterministic": false,
+        "trapAdded": false,
+        "minimalStates": 3,
+        "counts": {
+          "CONSISTENT": 3,
+          "MISSING_ACCEPTANCE": 0,
+          "SPURIOUS_ACCEPTANCE": 0,
+          "CONFLICTED": 0,
+          "UNREACHABLE": 0
+        }
+      }
+    },
+    {
+      "name": "Grading config: counting 1s mod 3 instead of reading the binary number is conflicted everywhere",
+      "type": "FA",
+      "answer": "mosel-binary-mod3-solution.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["0", "1"],
+          "condition": {
+            "kind": "valueMod",
+            "base": 2,
+            "m": 3,
+            "cmp": "=",
+            "r": 0
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "submission": "mosel-binary-mod3-digitsum.jff",
+      "expectCorrect": false,
+      "expectScore": 0.0,
+      "expectAnalysis": {
+        "specMatchesAnswerKey": true,
+        "nondeterministic": false,
+        "trapAdded": false,
+        "minimalStates": 3,
+        "counts": {
+          "CONSISTENT": 0,
+          "MISSING_ACCEPTANCE": 0,
+          "SPURIOUS_ACCEPTANCE": 0,
+          "CONFLICTED": 3,
+          "UNREACHABLE": 0
+        }
+      }
+    },
+    {
+      "name": "MOSEL as the answer (0*1*, no '10'): a correct DFA is correct, as against the answer file",
+      "type": "FA",
+      "answer": null,
+      "submission": "mosel-zeros-then-ones-solution.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["0", "1"],
+          "condition": {
+            "kind": "count",
+            "w": "10",
+            "cmp": "=",
+            "n": 0
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "sameFeedbackAs": "mosel-zeros-then-ones-solution.jff",
+      "expectCorrect": true,
+      "expectScore": 1.0
+    },
+    {
+      "name": "MOSEL as the answer (0*1*, no '10'): a wrong DFA gets the same witness as against the answer file",
+      "type": "FA",
+      "answer": null,
+      "submission": "mosel-zeros-then-ones-back-to-zeros.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["0", "1"],
+          "condition": {
+            "kind": "count",
+            "w": "10",
+            "cmp": "=",
+            "n": 0
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "sameFeedbackAs": "mosel-zeros-then-ones-solution.jff",
+      "expectCorrect": false,
+      "expectScore": 0.0
+    },
+    {
+      "name": "MOSEL as the answer (0*1*, no '10'): a DFA missing a symbol is refused as the answer file refuses it",
+      "type": "FA",
+      "answer": null,
+      "submission": "mosel-zeros-then-ones-only-zeros.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["0", "1"],
+          "condition": {
+            "kind": "count",
+            "w": "10",
+            "cmp": "=",
+            "n": 0
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "sameFeedbackAs": "mosel-zeros-then-ones-solution.jff",
+      "expectCorrect": false,
+      "expectErrorContains": "Different alphabets"
+    },
+    {
+      "name": "MOSEL as the answer (oneOf 'a', 'ab', 'ba'): a correct DFA is correct, as against the answer file",
+      "type": "FA",
+      "answer": null,
+      "submission": "mosel-finite-solution.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["a", "b"],
+          "condition": {
+            "kind": "oneOf",
+            "words": ["a", "ab", "ba"]
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "sameFeedbackAs": "mosel-finite-solution.jff",
+      "expectCorrect": true,
+      "expectScore": 1.0,
+      "expectAnalysis": {
+        "specMatchesAnswerKey": true,
+        "minimalStates": 5
+      }
+    },
+    {
+      "name": "MOSEL as the answer (oneOf 'a', 'ab', 'ba'): a DFA missing a word gets the same witness as against the answer file",
+      "type": "FA",
+      "answer": null,
+      "submission": "mosel-finite-missing-ba.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["a", "b"],
+          "condition": {
+            "kind": "oneOf",
+            "words": ["a", "ab", "ba"]
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "sameFeedbackAs": "mosel-finite-solution.jff",
+      "expectCorrect": false,
+      "expectScore": 0.0
+    },
+    {
+      "name": "MOSEL (oneOf 'a', 'ab', 'ba'): the state that loops after the last word holds both a listed word and FAIL, so it is conflicted",
+      "type": "FA",
+      "answer": "mosel-finite-solution.jff",
+      "submission": "mosel-finite-loops-at-end.jff",
+      "maxStates": -1,
+      "deterministic": false,
+      "gradingConfig": {
+        "mosel": {
+          "alphabet": ["a", "b"],
+          "condition": {
+            "kind": "oneOf",
+            "words": ["a", "ab", "ba"]
+          }
+        },
+        "rubric": {
+          "version": 1,
+          "kind": "binary"
+        }
+      },
+      "expectCorrect": false,
+      "expectScore": 0.0,
+      "expectAnalysis": {
+        "specMatchesAnswerKey": true,
+        "minimalStates": 5,
+        "counts": {
+          "CONSISTENT": 4,
+          "MISSING_ACCEPTANCE": 0,
+          "SPURIOUS_ACCEPTANCE": 0,
+          "CONFLICTED": 1,
+          "UNREACHABLE": 0
+        }
+      }
     }
   ]
 }

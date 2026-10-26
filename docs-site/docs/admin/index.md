@@ -11,6 +11,7 @@ The **Administration** menu contains the platform-wide tools:
 | [Courses](courses.md)                     | Create, duplicate, archive, restore, and delete courses.                         |
 | [Submissions](submissions.md)             | Review and rerun submissions across courses.                                     |
 | [Evaluator Sandbox](../faculty/evaluator-sandbox.md) | Run two files through the autograder on their own, with no course or grade.    |
+| [Rubrics](../faculty/rubrics.md)                   | Every rubric in the installation, and who owns it.                               |
 | [System Logs](system-logs.md)             | Search the system audit trail and export records.                                |
 | [System Settings](system-settings.md)     | Configure accounts, uploads, the evaluator, backups, security, TLS, and updates. |
 | [System Status](system-status.md)         | Check the server, database, Docker, network, sessions, and uploaded files.       |

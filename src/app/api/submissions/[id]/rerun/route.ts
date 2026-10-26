@@ -136,6 +136,9 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
         // The old result is gone, so the time it landed is gone with it.
         evaluatedAt: null,
         evaluationRaw: Prisma.DbNull,
+        // RUBRIC: the score and the rubric it came from belong to the old result too.
+        score: null,
+        rubricSnapshot: Prisma.DbNull,
         // A fresh attempt budget, and the row is nobody's: clearing the token is what stops a
         // worker that was mid-evaluation from writing its result over the rerun. `attempts` was
         // never enough for that, because a rerun reset it and the next claim took it back to

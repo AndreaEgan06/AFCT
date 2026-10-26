@@ -20,12 +20,23 @@ import { LimitField } from '@/components/ui/LimitField';
 import SwitchField from '@/components/ui/SwitchField';
 import Spinner from '@/components/ui/spinner';
 import FileUploadInput from '@/components/FileUploadInput';
+import {
+  EMPTY_MOSEL_DRAFT,
+  MoselSpecField,
+  moselDraftJson,
+  moselSpecError,
+} from '@/components/MoselSpecField';
 import { useMaxUploadSize } from '@/hooks/use-max-upload-size';
 import { fetchJson } from '@/lib/query-fetch';
 import { apiPaths } from '@/lib/api-paths';
 import { queryKeys } from '@/lib/query-keys';
 import { isTrialFinished, type EvaluatorTrialView } from '@/lib/evaluator-trial-view';
-import { ANSWER_FILE_EXTENSIONS, ANSWER_FILE_HINT, answerFileRejection } from '@/lib/answer-file';
+import {
+  ANSWER_FILE_EXTENSIONS,
+  ANSWER_FILE_HINT,
+  answerFileRejection,
+  missingAnswerKey,
+} from '@/lib/answer-file';
 import { cn } from '@/lib/utils';
 import { PAGE_HEADER_ICON_CLASS } from '@/lib/page-header';
 
@@ -72,6 +83,38 @@ const NOTE_SPAN: Record<ProblemType, string> = {
 // inputs beside it. Only the size and padding are its own.
 const SELECT_CLASS = cn(fieldControlClass, 'h-11 w-full min-w-0 px-3 py-1 text-base md:text-sm');
 
+/** The rubrics the caller can pick from, as the list route returns them. */
+type RubricOption = { id: string; name: string; owner: { name: string }; canEdit: boolean };
+
+/** The part of the evaluator's MOSEL analysis this page summarises. */
+type AnalysisSummary = { counts?: Record<string, number>; specMatchesAnswerKey?: boolean };
+
+const DIAGNOSIS_WORDS: Record<string, string> = {
+  CONSISTENT: 'consistent',
+  MISSING_ACCEPTANCE: 'missing acceptance',
+  SPURIOUS_ACCEPTANCE: 'spurious acceptance',
+  CONFLICTED: 'conflicted',
+  UNREACHABLE: 'unreachable',
+};
+
+/** "3 consistent, 1 conflicted": the states by diagnosis, leaving out the ones with none. */
+function describeAnalysis(analysis: AnalysisSummary): string {
+  const parts = Object.entries(analysis.counts ?? {})
+    .filter(([, n]) => n > 0)
+    .map(([d, n]) => `${n} ${DIAGNOSIS_WORDS[d] ?? d.toLowerCase()}`);
+  const states = parts.length > 0 ? `States: ${parts.join(', ')}.` : 'No states.';
+  return analysis.specMatchesAnswerKey === false
+    ? `${states} The description does not match the answer file, so this may be misleading.`
+    : states;
+}
+
+/** The analysis inside the raw output, if the run produced one. */
+function analysisOf(raw: unknown): AnalysisSummary | null {
+  if (!raw || typeof raw !== 'object' || !('analysis' in raw)) return null;
+  const analysis = (raw as { analysis?: unknown }).analysis;
+  return analysis && typeof analysis === 'object' ? (analysis as AnalysisSummary) : null;
+}
+
 /** Poll while the run is live; a second is fast enough to feel immediate. */
 const POLL_MS = 1_000;
 
@@ -97,6 +140,14 @@ export default function EvaluatorSandboxClient() {
   const [isDeterministic, setIsDeterministic] = useState(false);
   const [answerFile, setAnswerFile] = useState<File | undefined>();
   const [submissionFile, setSubmissionFile] = useState<File | undefined>();
+  const [moselSpec, setMoselSpec] = useState(EMPTY_MOSEL_DRAFT);
+  // RUBRIC: the Sandbox can score a run with one of the caller's rubrics.
+  const [rubricId, setRubricId] = useState('');
+  const { data: rubricList } = useQuery({
+    queryKey: queryKeys.rubrics(),
+    queryFn: () => fetchJson<{ rubrics: RubricOption[] }>(apiPaths.rubrics()),
+  });
+  const rubrics = rubricList?.rubrics ?? [];
 
   const [answerFileError, setAnswerFileError] = useState<string>();
   const [submissionFileError, setSubmissionFileError] = useState<string>();
@@ -136,10 +187,17 @@ export default function EvaluatorSandboxClient() {
   });
 
   const running = trialId !== null && (!trial || !isTrialFinished(trial.state));
-  const canRun = !!answerFile && !!submissionFile && !starting && !running;
+  const specInvalid = type === 'FA' && moselSpecError(moselSpec) !== null;
+  // An FA trial can be marked against the description instead of an answer file.
+  const answerMissing = missingAnswerKey({
+    type,
+    hasAnswerFile: !!answerFile,
+    hasMoselSpec: type === 'FA' && moselDraftJson(moselSpec) !== null,
+  });
+  const canRun = !answerMissing && !!submissionFile && !starting && !running && !specInvalid;
 
   const run = async () => {
-    if (!answerFile || !submissionFile) return;
+    if (answerMissing || !submissionFile) return;
     setStarting(true);
     setError(null);
     try {
@@ -149,7 +207,10 @@ export default function EvaluatorSandboxClient() {
         form.set('maxStates', unlimitedStates ? '-1' : maxStates);
       }
       if (type === 'FA') form.set('isDeterministic', String(isDeterministic));
-      form.set('answerFile', answerFile);
+      const moselJson = moselDraftJson(moselSpec);
+      if (type === 'FA' && moselJson) form.set('moselSpec', moselJson);
+      if (rubricId) form.set('rubricId', rubricId);
+      if (answerFile) form.set('answerFile', answerFile);
       form.set('submissionFile', submissionFile);
 
       const res = await fetch(apiPaths.evaluatorTrials(), { method: 'POST', body: form });
@@ -301,6 +362,41 @@ export default function EvaluatorSandboxClient() {
             >
               {TYPE_NOTES[type]}
             </p>
+
+            {/* RUBRIC: optional, any type. */}
+            <div className="min-w-0">
+              <div className="mb-2 flex min-h-8 items-center">
+                <Label htmlFor="trial-rubric" className="text-sm font-medium">
+                  Rubric
+                </Label>
+              </div>
+              <select
+                id="trial-rubric"
+                className={SELECT_CLASS}
+                value={rubricId}
+                disabled={running}
+                onChange={(e) => setRubricId(e.target.value)}
+              >
+                <option value="">None</option>
+                {rubrics.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.canEdit ? r.name : `${r.name} (${r.owner.name})`}
+                  </option>
+                ))}
+              </select>
+              <p className="text-muted-foreground mt-1 text-xs">Adds a score from 0 to 1.</p>
+            </div>
+
+            {type === 'FA' && (
+              <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+                <MoselSpecField
+                  id="trial-mosel-spec"
+                  value={moselSpec}
+                  onChange={setMoselSpec}
+                  disabled={running}
+                />
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -309,7 +405,8 @@ export default function EvaluatorSandboxClient() {
         <CardHeader>
           <CardTitle aria-level={2}>Files</CardTitle>
           <CardDescription>
-            Two files of the chosen type: the answer, and the attempt to check against it.
+            Two files of the chosen type: the answer, and the attempt to check against it. For a
+            finite automaton, a language description can stand in for the answer file.
           </CardDescription>
         </CardHeader>
 
@@ -321,7 +418,11 @@ export default function EvaluatorSandboxClient() {
             id="trial-answer-file"
             name="answerFile"
             label="Answer File"
-            description="The solution the submission is checked against."
+            description={
+              type === 'FA'
+                ? 'The solution the submission is checked against. Leave it out to check against the language description.'
+                : 'The solution the submission is checked against.'
+            }
             accept={ANSWER_FILE_EXTENSIONS}
             maxSizeMb={maxMb}
             hint={ANSWER_FILE_HINT}
@@ -355,8 +456,10 @@ export default function EvaluatorSandboxClient() {
             </p>
           )}
           <span className="text-muted-foreground mr-auto text-sm">
-            {!answerFile || !submissionFile
-              ? 'Choose both files to run a test.'
+            {!submissionFile || answerMissing
+              ? type === 'FA'
+                ? 'Choose a submission file, and an answer file or a language description.'
+                : 'Choose both files to run a test.'
               : 'The test joins the same queue that grades real submissions.'}
           </span>
           {trialId !== null && (
@@ -425,12 +528,26 @@ export default function EvaluatorSandboxClient() {
                     )}
                   </dd>
 
+                  {trial.score !== null && (
+                    <>
+                      <dt className="text-muted-foreground">Score</dt>
+                      <dd>{trial.score}</dd>
+                    </>
+                  )}
+
+                  {analysisOf(trial.evaluationRaw) && (
+                    <>
+                      <dt className="text-muted-foreground">MOSEL analysis</dt>
+                      <dd>{describeAnalysis(analysisOf(trial.evaluationRaw)!)}</dd>
+                    </>
+                  )}
+
                   <dt className="text-muted-foreground">Runtime</dt>
                   <dd>{formatRuntime(trial.durationMs)}</dd>
 
                   <dt className="text-muted-foreground">Files</dt>
                   <dd>
-                    {trial.answerFile} against {trial.submissionFile}
+                    {trial.answerFile ?? 'The language description'} against {trial.submissionFile}
                   </dd>
                 </dl>
               )}

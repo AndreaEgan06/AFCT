@@ -45,7 +45,7 @@ const answerFile = () => {
 const walkToAssignmentSettings = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.type(screen.getByLabelText('Title'), 'DFA #1');
   await clickNext(user); // -> Type
-  await clickNext(user); // -> Answer File
+  await clickNext(user); // -> Answer
 
   const fileInput = document.getElementById('answer-file') as HTMLInputElement;
   await user.upload(fileInput, answerFile());
@@ -120,7 +120,7 @@ describe('CreateProblemDialog', () => {
     expect(screen.queryByLabelText('Automatically Graded')).not.toBeInTheDocument();
     await clickNext(user);
 
-    // Step 3: Answer File
+    // Step 3: Answer
     const fileInput = document.getElementById('answer-file') as HTMLInputElement;
     await user.upload(fileInput, file);
 
@@ -154,6 +154,90 @@ describe('CreateProblemDialog', () => {
     expect(toastMock.created).toHaveBeenCalledWith('Problem', { name: undefined });
     expect(onCreated).toHaveBeenCalledWith({ id: 'prob-1' }, true);
     expect(setOpen).toHaveBeenCalledWith(false);
+  });
+
+  describe('the MOSEL description', () => {
+    const renderDialog = () =>
+      render(
+        <CreateProblemDialog
+          open
+          setOpen={vi.fn()}
+          courseId="course-1"
+          courseIsArchived={false}
+          onCreated={vi.fn()}
+        />,
+      );
+
+    const fillDescription = (alphabet: string, formula: string) => {
+      fireEvent.change(screen.getByLabelText('Alphabet'), { target: { value: alphabet } });
+      fireEvent.change(screen.getByLabelText('Condition'), { target: { value: formula } });
+    };
+
+    it('is sent with an FA problem when given, alongside the answer file', async () => {
+      const user = userEvent.setup();
+      respondCreated();
+      renderDialog();
+
+      await user.type(screen.getByLabelText('Title'), 'DFA #1');
+      await clickNext(user); // -> Type
+      await clickNext(user); // -> Answer
+      await user.upload(document.getElementById('answer-file') as HTMLInputElement, answerFile());
+      fillDescription('a, b', "endWt 'ab'");
+      const nextButton = screen.getByRole('button', { name: 'Next' });
+      await waitFor(() => expect(nextButton).toBeEnabled());
+      await user.click(nextButton); // -> Review
+      expect(screen.getByText('Given')).toBeInTheDocument();
+      const create = screen.getByRole('button', { name: 'Create Problem' });
+      await waitFor(() => expect(create).toBeEnabled());
+      await user.click(create);
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+      expect(form.get('moselSpec')).toBe(
+        '{"alphabet":["a","b"],"condition":{"kind":"endWt","w":"ab"}}',
+      );
+      expect(form.get('file')).toBeInstanceOf(File);
+    });
+
+    it('can stand in for the answer file', async () => {
+      const user = userEvent.setup();
+      respondCreated();
+      renderDialog();
+
+      await user.type(screen.getByLabelText('Title'), 'DFA #1');
+      await clickNext(user); // -> Type
+      await clickNext(user); // -> Answer
+      const nextButton = screen.getByRole('button', { name: 'Next' });
+      expect(nextButton).toBeDisabled();
+      fillDescription('0 1', "|indOf '10'| = 0");
+      await waitFor(() => expect(nextButton).toBeEnabled());
+      await user.click(nextButton); // -> Review
+      const create = screen.getByRole('button', { name: 'Create Problem' });
+      await waitFor(() => expect(create).toBeEnabled());
+      await user.click(create);
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+      expect(JSON.parse(form.get('moselSpec') as string)).toEqual({
+        alphabet: ['0', '1'],
+        condition: { kind: 'count', w: '10', cmp: '=', n: 0 },
+      });
+      expect(form.get('file')).toBeNull();
+    });
+
+    it('holds the wizard on the Answer step while it is invalid', async () => {
+      const user = userEvent.setup();
+      renderDialog();
+
+      await user.type(screen.getByLabelText('Title'), 'DFA #1');
+      await clickNext(user);
+      await clickNext(user);
+      await user.upload(document.getElementById('answer-file') as HTMLInputElement, answerFile());
+      fillDescription('a, b', "begWt 'ab' AND");
+
+      expect(screen.getByText(/^Formula, at character/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    });
   });
 
   it('says why a plain text answer file was rejected instead of ignoring it', async () => {
@@ -198,7 +282,7 @@ describe('CreateProblemDialog', () => {
       />,
     );
 
-    // Advance to the Answer File step.
+    // Advance to the Answer step.
     await user.type(screen.getByLabelText('Title'), 'DFA #1');
     await clickNext(user);
     await clickNext(user);

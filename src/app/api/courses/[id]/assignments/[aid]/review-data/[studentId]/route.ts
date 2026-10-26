@@ -7,6 +7,7 @@ import {
   discloseGradeFeedback,
   discloseSubmissionFeedback,
   feedbackVisibilityMap,
+  discloseEvaluationRaw,
 } from '@/lib/feedback-visibility';
 import { withCourseAuth } from '@/lib/api/with-auth';
 import { logDenial } from '@/lib/api/activity';
@@ -379,7 +380,8 @@ export const GET = withCourseAuth(
             status: s.status,
             ...discloseSubmissionFeedback(s, visibility, { isStaff }),
             correct: s.correct,
-            evaluationRaw: s.evaluationRaw ?? null,
+            // The MOSEL analysis inside it is staff-only.
+            evaluationRaw: discloseEvaluationRaw(s.evaluationRaw, { isStaff }),
             fileName: s.fileName,
             originalFileName: s.originalFileName,
             // Who actually made this attempt; the staff view surfaces it for group work.

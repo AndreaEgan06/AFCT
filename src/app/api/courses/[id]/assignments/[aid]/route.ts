@@ -33,6 +33,7 @@ interface AssignmentWithProblemsAndCourse {
       isDeterministic: boolean | null;
       fileName: string | null;
       originalFileName: string | null;
+      moselSpec: unknown;
     };
     maxPoints: number;
     maxSubmissions: number;
@@ -206,6 +207,7 @@ export const GET = withCourseAuth(
                   isDeterministic: true,
                   fileName: true,
                   originalFileName: true,
+                  moselSpec: true,
                 },
               },
             },
@@ -306,6 +308,9 @@ export const GET = withCourseAuth(
             // receive them, matching the upload/download restriction).
             fileName: isStaff ? ap.problem.fileName : null,
             originalFileName: isStaff ? ap.problem.originalFileName : null,
+            // The language description is an answer key too (the only one, on a problem with
+            // no file), so it is withheld from non-staff the same way.
+            moselSpec: isStaff ? ap.problem.moselSpec : null,
           },
           maxPoints: ap.maxPoints,
           maxSubmissions: ap.maxSubmissions,

@@ -8,7 +8,7 @@ vi.mock('../../lib/java-runner', () => ({
   },
 }));
 
-import { buildEvaluatorArgs, runEvaluatorJar } from '@/lib/evaluator-runner';
+import { buildEvaluatorArgs, buildGradingConfig, runEvaluatorJar } from '@/lib/evaluator-runner';
 
 const CONFIG = { timeoutMs: 5_000, maxMemoryMb: 256, analyzerLimit: 100 };
 
@@ -151,5 +151,115 @@ describe('runEvaluatorJar', () => {
     });
 
     expect(executeMock.mock.calls[0][1].env.TIMEOUT_SECONDS).toBe('1');
+  });
+});
+
+const SPEC = { alphabet: ['a', 'b'], condition: { kind: 'endWt', w: 'ab' } };
+const BINARY = { version: 1, kind: 'binary' };
+
+describe('buildGradingConfig', () => {
+  it('is null when there is neither a description nor a rubric, so the jar runs as it always did', () => {
+    expect(buildGradingConfig({ type: 'FA' })).toBeNull();
+    expect(buildGradingConfig({ type: 'FA', moselSpec: null, rubricDefinition: null })).toBeNull();
+  });
+
+  it('sends the description for an FA problem only', () => {
+    expect(buildGradingConfig({ type: 'FA', moselSpec: SPEC })).toEqual({ mosel: SPEC });
+    expect(buildGradingConfig({ type: 'CFG', moselSpec: SPEC })).toBeNull();
+  });
+
+  // RUBRIC: rubric pass-through to the jar.
+  it('sends the rubric for any problem type', () => {
+    expect(buildGradingConfig({ type: 'CFG', rubricDefinition: BINARY })).toEqual({ rubric: BINARY });
+    expect(buildGradingConfig({ type: 'FA', moselSpec: SPEC, rubricDefinition: BINARY })).toEqual({
+      mosel: SPEC,
+      rubric: BINARY,
+    });
+  });
+});
+
+describe('runEvaluatorJar with a grading config', () => {
+  beforeEach(() => {
+    executeMock.mockReset();
+  });
+
+  it('passes the config on stdin and reads the score back', async () => {
+    executeMock.mockResolvedValue({
+      stdout: '{"correct":false,"feedback":"No","score":0.0,"analysis":{"counts":{}}}',
+      stderr: '',
+    });
+
+    const grading = { mosel: SPEC, rubric: BINARY } as Parameters<typeof runEvaluatorJar>[0]['grading'];
+    const result = await runEvaluatorJar({
+      answerFilePath: 'a.jff',
+      uploadedFilePath: 'b.jff',
+      config: CONFIG,
+      problem: { type: 'FA', maxStates: -1, isDeterministic: false },
+      grading,
+    });
+
+    const [args, options] = executeMock.mock.calls[0];
+    expect(args).toEqual(['--json', '--grading-config', '-', 'a.jff', 'b.jff', '-1', 'false']);
+    expect(JSON.parse(options.input)).toEqual({ mosel: SPEC, rubric: BINARY });
+    expect(result).toMatchObject({ outcome: 'ok', correct: false, score: 0 });
+  });
+
+  it('ignores a score that is not a number from 0 to 1', async () => {
+    for (const score of ['1', 1.5, -0.1, null]) {
+      executeMock.mockResolvedValueOnce({
+        stdout: JSON.stringify({ correct: true, score }),
+        stderr: '',
+      });
+      const result = await run({ type: 'FA' });
+      expect(result.outcome === 'ok' && result.score).toBeUndefined();
+    }
+  });
+
+  it('marks against the description when there is no answer file', async () => {
+    executeMock.mockResolvedValue({ stdout: '{"correct":true,"feedback":"Correct!"}', stderr: '' });
+
+    const grading = { mosel: SPEC } as Parameters<typeof runEvaluatorJar>[0]['grading'];
+    const result = await runEvaluatorJar({
+      answerFilePath: null,
+      uploadedFilePath: 'b.jff',
+      config: CONFIG,
+      problem: { type: 'FA', maxStates: -1, isDeterministic: false },
+      grading,
+    });
+
+    const [args, options] = executeMock.mock.calls[0];
+    expect(args).toEqual([
+      '--json',
+      '--grading-config',
+      '-',
+      '--answer-from-mosel',
+      'b.jff',
+      '-1',
+      'false',
+    ]);
+    expect(JSON.parse(options.input)).toEqual({ mosel: SPEC });
+    expect(result).toMatchObject({ outcome: 'ok', correct: true });
+  });
+
+  it('does not run without an answer file or a description', async () => {
+    const result = await runEvaluatorJar({
+      answerFilePath: null,
+      uploadedFilePath: 'b.jff',
+      config: CONFIG,
+      problem: { type: 'FA', maxStates: -1, isDeterministic: false },
+      grading: null,
+    });
+
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ outcome: 'error' });
+  });
+
+  it('sends no stdin and no flag without a config', async () => {
+    executeMock.mockResolvedValue({ stdout: '{"correct":true}', stderr: '' });
+
+    await run({ type: 'FA' });
+
+    expect(executeMock.mock.calls[0][0]).not.toContain('--grading-config');
+    expect(executeMock.mock.calls[0][1]).not.toHaveProperty('input');
   });
 });

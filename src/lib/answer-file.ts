@@ -48,3 +48,23 @@ export function answerFileRejection(text: string, problemType: string): string |
 
   return null;
 }
+
+/**
+ * Why a problem has nothing to mark submissions against, or null when it has.
+ *
+ * Every problem needs an answer key. For most types that is the answer file; a finite
+ * automaton problem can instead (or as well) have a MOSEL description, which the evaluator
+ * turns into the same kind of key. The wizards and the routes ask this of the problem as it
+ * would be saved, so they cannot disagree about it.
+ */
+export function missingAnswerKey(problem: {
+  type: string | null | undefined;
+  hasAnswerFile: boolean;
+  hasMoselSpec: boolean;
+}): string | null {
+  if (problem.hasAnswerFile) return null;
+  if (problem.type === 'FA') {
+    return problem.hasMoselSpec ? null : 'Give an answer file, a language description, or both.';
+  }
+  return 'Answer file is required.';
+}

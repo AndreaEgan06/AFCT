@@ -206,6 +206,21 @@ left in `PROCESSING` too long is returned to `PENDING` by a periodic reaper so i
 retried, and a row that keeps failing is moved to `FAILED` so it cannot loop forever. On a
 completed autograded submission, grades are written without overwriting a manual grade.
 
+<!-- RUBRIC: the grading-config path and the score-to-points rule. -->
+When the problem is a finite automaton with a MOSEL language description, or its assignment
+link has a rubric, the worker also passes the evaluator a grading config (`--grading-config -`,
+on stdin) holding both. The evaluator then adds a state-by-state `analysis` of the submission
+(staff-only; removed from what students are sent) and a rubric `score` from 0 to 1 to its
+output. The verdict comes from the answer file, or, for a finite automaton problem with no
+answer file, from the description: the worker then runs the evaluator with
+`--answer-from-mosel` instead of an answer file path, and the evaluator builds the DFA the
+description stands for and runs the usual equivalence check against it, so the student-facing
+feedback is the same as an answer file for that language would give. The description used is
+copied onto the submission (`answerMoselSpec`), as the answer file's name is otherwise. The grade is full points when
+correct and `score × maxPoints` otherwise; with no rubric, or with the binary rubric that is the
+only kind so far, that is the usual full-or-zero. The score and a copy of the rubric are stored
+on the submission.
+
 The worker finds new submissions by checking the queue on a timer rather than being pushed
 to, and it checks less often the longer the queue stays empty, down to twice a minute. A
 submission arriving after a quiet period can therefore sit for up to half a minute before

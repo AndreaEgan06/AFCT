@@ -63,6 +63,7 @@ import {
   Settings,
   Wrench,
   FlaskConical,
+  ClipboardCheck,
 } from 'lucide-react';
 import { getInitials } from '@/app/utils/initials';
 
@@ -95,6 +96,8 @@ const adminMenu = [
   { title: 'Submissions', url: '/dashboard/submissions', icon: CircleCheckBig },
   { title: 'Courses', url: '/dashboard/courses', icon: Book },
   { title: 'Evaluator Sandbox', url: '/dashboard/evaluator-sandbox', icon: FlaskConical },
+  // RUBRIC: the rubric library.
+  { title: 'Rubrics', url: '/dashboard/rubrics', icon: ClipboardCheck },
   { title: 'System Logs', url: '/dashboard/system-logs', icon: Logs },
   { title: 'System Settings', url: '/dashboard/system-settings', icon: Settings },
   { title: 'System Status', url: '/dashboard/system-status', icon: Activity },

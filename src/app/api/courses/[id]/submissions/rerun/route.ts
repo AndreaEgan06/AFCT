@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getClientIp } from '@/lib/security/rate-limiter';
 
@@ -56,6 +57,9 @@ export const POST = withCourseAuth(
           correct: null,
           // The old result is gone, so the time it landed is gone with it.
           evaluatedAt: null,
+          // RUBRIC: the score and the rubric it came from belong to the old result too.
+          score: null,
+          rubricSnapshot: Prisma.DbNull,
           attempts: 0,
           processingToken: null,
         },

@@ -221,6 +221,12 @@ export const apiPaths = {
   evaluatorTrials: () => '/api/evaluator-trials',
   evaluatorTrial: (id: string) => `/api/evaluator-trials/${id}`,
 
+  // --- Rubrics (an instructor's library, not course-scoped) -----------------
+  // RUBRIC: see RUBRIC_LOCATIONS.md.
+  rubrics: (opts?: { courseId?: string }) => `/api/rubrics${qs({ courseId: opts?.courseId })}`,
+  rubric: (id: string) => `/api/rubrics/${id}`,
+  rubricDuplicate: (id: string) => `/api/rubrics/${id}/duplicate`,
+
   // --- Account -------------------------------------------------------------
   user: (id: string) => `/api/users/${id}`,
   sessionExtend: () => '/api/session/extend',

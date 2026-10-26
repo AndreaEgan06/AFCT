@@ -228,6 +228,7 @@ model User {
   ltiContextMembers       LtiContextMember[] // the LMS courses this person has been seen in
   ltiScores               LtiScoreQueue[] // their grades queued for an LMS gradebook
   evaluatorTrials         EvaluatorTrial[] // staff dry runs of the evaluator this user asked for
+  rubrics                 Rubric[] // the grading rubrics in this instructor's library
   /// Launches that matched this account and are waiting for a password to confirm it.
   ltiPendingIdentityLinks LtiPendingIdentityLink[]
 
@@ -748,7 +749,8 @@ model Problem {
   descriptionFormat DescriptionFormat @default(PLAIN_TEXT)
   /// Formatted statement, when the problem uses rich text.
   descriptionJson   Json?
-  /// Stored reference solution file.
+  /// Stored reference solution file. Empty for a finite automaton problem defined by its
+  /// MOSEL description alone.
   fileName          String?
   /// Name of the reference file as uploaded, for display.
   originalFileName  String?
@@ -765,6 +767,16 @@ model Problem {
   maxStates         Int?
   /// Whether the solution must be deterministic.
   isDeterministic   Boolean?
+  /// The target language as a MOSEL description (an alphabet and a condition), for finite
+  /// automaton problems only.
+  ///
+  /// A problem needs an answer file, this, or both. Without an answer file, submissions are
+  /// marked against the DFA the evaluator builds from the description, by the same equivalence
+  /// check and the same kind of witness feedback an answer file would give. With one, the answer
+  /// file stays the authority on what is correct. Either way the evaluator also checks each
+  /// state of a submitted automaton against the description and stores that analysis with the
+  /// attempt. JSON shape in src/schemas/mosel.ts.
+  moselSpec         Json?
   // NOTE: maxPoints / maxSubmissions / autograderEnabled are per-assignment and live on
   // AssignmentProblem (a problem can be worth different points, allow a different number
   // of submissions, or be autograded in one assignment but not another). They are NOT here.
@@ -825,6 +837,17 @@ model AssignmentProblem {
   /// rather than this being read back later as though it had never changed.
   showFeedback      Boolean  @default(true)
 
+  // RUBRIC: which rubric grades this problem on this assignment (see RUBRIC_LOCATIONS.md).
+  /// The rubric that turns an evaluation into points here. Empty means none: full points when
+  /// correct, nothing otherwise.
+  ///
+  /// The rubric belongs to an instructor rather than to this course, so the same one can sit on
+  /// any number of problems. Deleting it is refused while anything uses it; if its owner's
+  /// account is deleted, this goes back to empty.
+  rubric   Rubric? @relation(fields: [rubricId], references: [id], onDelete: SetNull)
+  /// Which rubric.
+  rubricId String?
+
   submissions Submission[]
   grades      AssignmentProblemGrade[]
   grants      SubmissionGrant[]
@@ -833,6 +856,8 @@ model AssignmentProblem {
   // assignmentId leads the primary key already. problemId does not, and Postgres does not
   // index a foreign key on its own, so without this deleting a problem scans the whole table.
   @@index([problemId])
+  // "Where is this rubric used", and the in-use check before deleting one.
+  @@index([rubricId])
 }
 
 /// Extra attempts given to one student or one group on one problem, over and above the limit
@@ -1020,20 +1045,30 @@ model GroupMembership {
 /// @erd System
 model Submission {
   /// Unique identifier.
-  id            String   @id @default(cuid())
+  id             String   @id @default(cuid())
   /// Feedback produced for this attempt.
-  feedback      String?
+  feedback       String?
   /// Whether the problem was showing evaluator feedback to students when this attempt was graded.
   ///
   /// Stamped by the worker rather than read from `AssignmentProblem.showFeedback` at display time,
   /// because that setting can change mid-term and this has to keep saying what the student was
   /// actually under. Null for anything graded before the setting existed, which is honest: those
   /// attempts predate the distinction. See RQ5 in the grant.
-  feedbackShown Boolean?
+  feedbackShown  Boolean?
   /// Whether the attempt was judged correct. Empty until grading finishes.
-  correct       Boolean?
-  /// Full grader output, kept for diagnosis.
-  evaluationRaw Json?
+  correct        Boolean?
+  /// Full grader output, kept for diagnosis. For a finite automaton problem with a MOSEL
+  /// description this includes the state-by-state analysis, which is not shown to students.
+  evaluationRaw  Json?
+  // RUBRIC: the rubric's output and the definition it was graded under (see RUBRIC_LOCATIONS.md).
+  /// The score the rubric gave, from 0 to 1. Empty when no rubric applied, which grades as
+  /// full points when correct and nothing otherwise.
+  score          Float?
+  /// The rubric definition this attempt was graded under, copied rather than referenced.
+  ///
+  /// The same rule as `answerFileName`: editing a rubric does not move grades already given,
+  /// and staff rerun submissions on purpose to apply an edit. Empty when no rubric applied.
+  rubricSnapshot Json?
 
   /// Stored submitted file.
   fileName         String?
@@ -1065,9 +1100,14 @@ model Submission {
   /// can still be named, which is what this does, and why a replaced key is now kept rather
   /// than deleted.
   ///
-  /// Null for attempts marked before this existed, and for anything that never reached the
-  /// evaluator: a submission with no file, a missing answer key, a failed run.
-  answerFileName String?
+  /// Null for attempts marked before this existed, for attempts marked against a MOSEL
+  /// description (see `answerMoselSpec`), and for anything that never reached the evaluator: a
+  /// submission with no file, a missing answer key, a failed run.
+  answerFileName  String?
+  /// The MOSEL description this attempt was marked against, copied, when its problem had no
+  /// answer file. The same record as `answerFileName`, for a key that is not a file: editing
+  /// the description later does not change what this attempt says it was measured against.
+  answerMoselSpec Json?
 
   /// sha256 of the file exactly as it arrived, with nothing normalised away. The two hashes
   /// above look past the incidental on purpose, which is why neither can say "this is the
@@ -1941,18 +1981,25 @@ model EvaluatorTrial {
 
   /// Which mode to run the evaluator in. The CLI arguments differ by type: FA and PDA
   /// carry a state bound, and FA a determinism flag as well.
-  problemType     ProblemType
+  problemType      ProblemType
   /// State bound for FA/PDA, as on the problem itself. Empty means unbounded.
-  maxStates       Int?
+  maxStates        Int?
   /// Whether an FA answer must be deterministic.
-  isDeterministic Boolean?
+  isDeterministic  Boolean?
+  /// An optional MOSEL description, as on a problem: what an FA submission is marked against
+  /// when there is no answer file, and analysed against either way.
+  moselSpec        Json?
+  // RUBRIC: the rubric definition a trial runs under (see RUBRIC_LOCATIONS.md).
+  /// An optional rubric definition to score the run with.
+  rubricDefinition Json?
 
   /// Stored upload names under the trials directory. Cleared when the files are deleted,
   /// which is what tells the orphan sweep it has nothing left to remove for this row.
   answerFileName         String?
   submissionFileName     String?
-  /// What the uploader called the files, kept for display after the uploads are gone.
-  answerOriginalName     String
+  /// What the uploader called the files, kept for display after the uploads are gone. No
+  /// answer name means the run had no answer file and was marked against `moselSpec`.
+  answerOriginalName     String?
   submissionOriginalName String
 
   /// Where the run has got to.
@@ -1960,6 +2007,8 @@ model EvaluatorTrial {
 
   /// Whether the evaluator judged the submitted file correct. Empty until it finishes.
   correct       Boolean?
+  /// The rubric's score, from 0 to 1, when the trial ran with one.
+  score         Float?
   /// The evaluator's feedback, or the reason it produced none.
   feedback      String?
   /// Full evaluator output, which is the point of the page.
@@ -2106,4 +2155,40 @@ model ClientAuthCode {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+/// A grading rubric in an instructor's own library: how an evaluation becomes a grade.
+///
+/// Owned by a person rather than a course, so an instructor can reuse one rubric on as many
+/// problems, assignments and courses as they like. Course staff can see a rubric attached in
+/// their course; only its owner (or an administrator) changes it, and anybody else duplicates it
+/// to get their own copy. A rubric in use cannot be deleted.
+///
+/// The shape of a real rubric is not decided yet. Until it is, the only definition that can
+/// exist is `{ "version": 1, "kind": "binary" }`, which grades exactly like having no rubric.
+/// Every place that will need to change is listed in RUBRIC_LOCATIONS.md next to the plan.
+///
+/// @namespace Assignments
+model Rubric {
+  /// Unique identifier.
+  id          String  @id @default(cuid())
+  /// What the instructor calls it.
+  name        String
+  /// A note on what it is for.
+  description String?
+  /// What the rubric does, as JSON. Shape in src/schemas/rubric.ts.
+  definition  Json
+
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// The instructor whose library it is in.
+  ownerId String
+
+  /// When this record was created.
+  createdAt DateTime @default(now())
+  /// When this record was last changed.
+  updatedAt DateTime @updatedAt
+
+  assignmentProblems AssignmentProblem[]
+
+  @@index([ownerId])
 }

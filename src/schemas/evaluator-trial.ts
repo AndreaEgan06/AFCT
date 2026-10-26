@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { formBooleanOptional, formIntOptional } from './fields';
 import { ProblemTypeEnum } from './problem';
+import { moselSpecFormField } from './mosel';
 
 /**
  * A staff evaluator trial as it arrives from the page (multipart, so every scalar is a
@@ -17,6 +18,13 @@ export const EvaluatorTrialCreateApiSchema = z.object({
     'Max states must be -1 (unlimited) or between 1 and 1000.',
   ),
   isDeterministic: formBooleanOptional,
+  // FA only, optional: a MOSEL description to analyse the submitted file against.
+  moselSpec: moselSpecFormField,
+  // RUBRIC: optional; one of the caller's rubrics (or one in use in a course they staff).
+  rubricId: z.preprocess(
+    (v) => (v === '' || v === null ? undefined : v),
+    z.string().trim().min(1).optional(),
+  ),
 });
 
 export type EvaluatorTrialCreateApiInput = z.infer<typeof EvaluatorTrialCreateApiSchema>;

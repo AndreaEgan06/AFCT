@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><!--Created by hand for the MOSEL golden cases: 0*1*. Wrong: never reads a 1.--><structure>
+	<type>fa</type>
+	<automaton>
+		<state id="0" name="zeros">
+			<x>100.0</x>
+			<y>100.0</y>
+			<initial/>
+			<final/>
+		</state>
+		<transition>
+			<from>0</from>
+			<to>0</to>
+			<read>0</read>
+		</transition>
+	</automaton>
+</structure>

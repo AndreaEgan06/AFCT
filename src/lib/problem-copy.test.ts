@@ -42,6 +42,7 @@ const source = {
   type: 'FA' as const,
   maxStates: 6,
   isDeterministic: true,
+  moselSpec: { condition: { kind: 'lengthMod', m: 2, cmp: '=', r: 0 } },
   // The answer key's fingerprints, which travel with the file they describe.
   answerContentHash: 'content-hash',
   answerShapeHash: 'shape-hash',
@@ -64,9 +65,17 @@ describe('copying one problem', () => {
       type: 'FA',
       maxStates: 6,
       isDeterministic: true,
+      moselSpec: source.moselSpec,
       courseId: 'c2',
       title: 'Copy',
     });
+  });
+
+  // It describes the language, not the file, so it travels even when the file could not.
+  it('carries the MOSEL description even without an answer file', async () => {
+    await copyProblemInto({ source: { ...source, fileName: null }, courseId: 'c2', title: 'Copy' });
+
+    expect(prismaMock.problem.create.mock.calls[0][0].data.moselSpec).toEqual(source.moselSpec);
   });
 
   /**

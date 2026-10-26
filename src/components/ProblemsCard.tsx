@@ -5,7 +5,7 @@ import type { Problem } from '@prisma/client';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/data-table';
-import { Plus, FileText, Download, FlaskConical } from 'lucide-react';
+import { Plus, FileText, Download, FlaskConical, ClipboardCheck } from 'lucide-react';
 
 interface ProblemsCardProps {
   courseId: string;
@@ -42,6 +42,12 @@ export function ProblemsCard({
           <Button variant="outline" asChild>
             <Link href="/dashboard/evaluator-sandbox">
               <FlaskConical /> Evaluator Sandbox
+            </Link>
+          </Button>
+          {/* RUBRIC: the faculty way in to the rubric library, beside the sandbox. */}
+          <Button variant="outline" asChild>
+            <Link href="/dashboard/rubrics">
+              <ClipboardCheck /> Rubrics
             </Link>
           </Button>
           {onImportProblem && (

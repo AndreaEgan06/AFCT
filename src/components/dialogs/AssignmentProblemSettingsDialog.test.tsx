@@ -104,11 +104,35 @@ const settingsResponse = (over: Record<string, unknown> = {}) =>
       }),
   }) as unknown as Response;
 
+const jsonResponse = (body: unknown) =>
+  ({
+    ok: true,
+    status: 200,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  }) as unknown as Response;
+
+// RUBRIC: what the picker lists.
+const RUBRICS = {
+  rubrics: [
+    { id: 'r-own', name: 'My rubric', owner: { name: 'Me' }, canEdit: true },
+    { id: 'r-shared', name: 'Shared rubric', owner: { name: 'Dr. Lee' }, canEdit: false },
+  ],
+};
+
+/** Requests by what they are for, so the order the dialog makes them in does not matter. */
+const routeFetch = (settings: Response = settingsResponse()) =>
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (String(url).startsWith('/api/rubrics')) return jsonResponse(RUBRICS);
+    if (init?.method === 'PUT') return jsonResponse({ success: true });
+    return settings;
+  });
+
 beforeEach(() => {
   fetchMock.mockReset();
   global.fetch = fetchMock as unknown as typeof fetch;
   // Default: the dialog's own GET succeeds and reports no attempts yet.
-  fetchMock.mockResolvedValue(settingsResponse());
+  routeFetch();
   toastSuccessMock.mockReset();
   toastErrorMock.mockReset();
 });
@@ -139,12 +163,6 @@ const renderDialog = () => {
 describe('AssignmentProblemSettingsDialog', () => {
   it('PUTs the per-assignment link settings', async () => {
     const user = userEvent.setup();
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ success: true }),
-      text: async () => JSON.stringify({ success: true }),
-    } as unknown as Response);
 
     const { setOpen, onSaved } = renderDialog();
 
@@ -167,6 +185,8 @@ describe('AssignmentProblemSettingsDialog', () => {
             maxSubmissions: 5,
             autograderEnabled: true,
             showFeedback: true,
+            // Read back as none when the dialog opened, so saved as none.
+            rubricId: null,
           }),
         }),
       ),
@@ -203,7 +223,7 @@ describe('AssignmentProblemSettingsDialog', () => {
    */
   it('warns before changing the feedback setting on a problem with attempts', async () => {
     const user = userEvent.setup();
-    fetchMock.mockResolvedValue(settingsResponse({ submissionCount: 12 }));
+    routeFetch(settingsResponse({ submissionCount: 12 }));
 
     renderDialog();
 
@@ -222,7 +242,7 @@ describe('AssignmentProblemSettingsDialog', () => {
     // it lands in a live region. Mounted up front and filled later, because a region inserted
     // together with its first message is not reliably announced.
     const user = userEvent.setup();
-    fetchMock.mockResolvedValue(settingsResponse({ submissionCount: 3 }));
+    routeFetch(settingsResponse({ submissionCount: 3 }));
 
     const { baseElement } = renderDialog();
     const regions = () => baseElement.querySelectorAll('[role="status"], [aria-live]');
@@ -239,11 +259,50 @@ describe('AssignmentProblemSettingsDialog', () => {
 
   it('says nothing when no attempts exist yet', async () => {
     const user = userEvent.setup();
-    fetchMock.mockResolvedValue(settingsResponse({ submissionCount: 0 }));
+    routeFetch(settingsResponse({ submissionCount: 0 }));
 
     renderDialog();
     await user.click(screen.getByLabelText('Show Feedback to Students'));
 
     expect(screen.queryByText(/already been made/)).not.toBeInTheDocument();
+  });
+
+  // RUBRIC: the picker.
+  describe('the rubric', () => {
+    const putBody = async () => {
+      const put = await waitFor(() => {
+        const call = fetchMock.mock.calls.find(
+          (c) => (c[1] as RequestInit | undefined)?.method === 'PUT',
+        );
+        expect(call).toBeDefined();
+        return call!;
+      });
+      return JSON.parse((put[1] as RequestInit).body as string);
+    };
+
+    it('starts on the rubric already attached and keeps it on save', async () => {
+      const user = userEvent.setup();
+      routeFetch(settingsResponse({ rubricId: 'r-shared' }));
+
+      renderDialog();
+      const save = screen.getByRole('button', { name: 'Save' });
+      await waitFor(() => expect(screen.getByRole('combobox', { name: /Rubric/ })).toBeEnabled());
+      await user.click(save);
+
+      expect((await putBody()).rubricId).toBe('r-shared');
+    });
+
+    it('sends nothing about the rubric when the current one could not be read', async () => {
+      const user = userEvent.setup();
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (init?.method === 'PUT') return jsonResponse({ success: true });
+        return { ok: false, status: 500, json: async () => ({}), text: async () => '{}' } as unknown as Response;
+      });
+
+      renderDialog();
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(await putBody()).not.toHaveProperty('rubricId');
+    });
   });
 });

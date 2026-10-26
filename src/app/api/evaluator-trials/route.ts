@@ -14,10 +14,15 @@ import { ALLOWED_PROBLEM_EXTENSIONS, isAllowedProblemExtension } from '@/schemas
 import { EvaluatorTrialCreateApiSchema } from '@/schemas/evaluator-trial';
 import { TRIALS_DIR, trialExpiresAt, pruneExpiredTrials } from '@/lib/evaluator-trials';
 import { serializeTrial } from '@/lib/evaluator-trial-view';
+import { findVisibleRubric } from '@/lib/rubrics';
+import { missingAnswerKey } from '@/lib/answer-file';
+import type { Prisma } from '@prisma/client';
 
 /**
  * Starts an evaluator trial: an answer file and a submitted file, queued to be run
- * through the real evaluator. Course staff (faculty or TAs) or a system admin.
+ * through the real evaluator. Course staff (faculty or TAs) or a system admin. An FA
+ * trial may give a MOSEL description instead of the answer file, and is then marked
+ * against it, as a problem with no answer file would be.
  *
  * Nothing here is graded and nothing is kept: the uploads are deleted as soon as the run
  * finishes and the result expires within the hour. A caller may only have one trial in
@@ -30,16 +35,18 @@ import { serializeTrial } from '@/lib/evaluator-trial-view';
  *     multipart/form-data:
  *       schema:
  *         type: object
- *         required: [type, answerFile, submissionFile]
+ *         required: [type, submissionFile]
  *         properties:
  *           type: { type: string, description: "Problem type (FA, PDA, RE, CFG, TM)" }
  *           maxStates: { type: string, description: FA/PDA only }
  *           isDeterministic: { type: string, enum: ['true', 'false'], description: FA only }
- *           answerFile: { type: string, format: binary }
+ *           moselSpec: { type: string, description: "FA only: a MOSEL description (JSON). Without an answer file the submission is marked against it; with one it is analysed against it." }
+ *           rubricId: { type: string, description: "Optional: a rubric to score the run with." }
+ *           answerFile: { type: string, format: binary, description: "Required unless an FA trial gives moselSpec." }
  *           submissionFile: { type: string, format: binary }
  * responses:
  *   201: { description: The queued trial. }
- *   400: { description: "Missing files, or a file failed structure validation." }
+ *   400: { description: "Missing files, a file failed structure validation, or an unknown rubric." }
  *   401: { description: Not signed in. }
  *   403: { description: Caller is not course staff or a system admin. }
  *   409: { description: The caller already has a trial in flight. }
@@ -52,22 +59,39 @@ export const POST = withStaffAuth(
     try {
       const parsed = await readFormData(req, EvaluatorTrialCreateApiSchema);
       if (!parsed.ok) return parsed.response;
-      const { type, maxStates, isDeterministic } = parsed.data;
+      const { type, maxStates, isDeterministic, moselSpec, rubricId } = parsed.data;
 
-      const answerFile = parsed.form.get('answerFile') as File | null;
-      const submissionFile = parsed.form.get('submissionFile') as File | null;
-      if (!answerFile?.size || !submissionFile?.size) {
-        return apiError(400, 'Both an answer file and a submission file are required.');
+      // RUBRIC: the definition is copied onto the trial, so the run uses the rubric as it was
+      // when it was asked for, like a submission does.
+      let rubricDefinition: Prisma.InputJsonValue | undefined;
+      if (rubricId) {
+        const rubric = await findVisibleRubric(user, rubricId);
+        if (!rubric) return apiError(400, 'Rubric not found.');
+        rubricDefinition = rubric.definition as Prisma.InputJsonValue;
       }
 
+      const uploadedAnswer = parsed.form.get('answerFile') as File | null;
+      const answerFile = uploadedAnswer?.size ? uploadedAnswer : null;
+      const submissionFile = parsed.form.get('submissionFile') as File | null;
+      if (!submissionFile?.size) {
+        return apiError(400, 'A submission file is required.');
+      }
+      const missing = missingAnswerKey({
+        type,
+        hasAnswerFile: answerFile !== null,
+        hasMoselSpec: type === 'FA' && moselSpec != null,
+      });
+      if (missing) return apiError(400, missing);
+
       for (const file of [answerFile, submissionFile]) {
+        if (!file) continue;
         if (!isAllowedProblemExtension(file.name)) {
           return apiError(400, `Allowed file types: .${ALLOWED_PROBLEM_EXTENSIONS.join(', .')}`);
         }
       }
 
       const { maxBytes, maxMb } = await getSystemUploadLimit();
-      if (answerFile.size > maxBytes || submissionFile.size > maxBytes) {
+      if ((answerFile?.size ?? 0) > maxBytes || submissionFile.size > maxBytes) {
         return apiError(413, `File exceeds max upload size (${maxMb} MB).`);
       }
 
@@ -83,11 +107,12 @@ export const POST = withStaffAuth(
 
       // Same structure check a real upload gets, which is also what keeps the evaluator
       // away from hostile XML (see xmlStructureValidate).
-      const uploads: { file: File; buffer: Buffer }[] = [];
+      const uploads: { label: 'answer' | 'submission'; file: File; buffer: Buffer }[] = [];
       for (const [label, file] of [
         ['answer', answerFile],
         ['submission', submissionFile],
       ] as const) {
+        if (!file) continue;
         const buffer = Buffer.from(await file.arrayBuffer());
         const validation = validateStructureXML(buffer.toString('utf8'), type);
         if (!validation.isValid) {
@@ -100,18 +125,17 @@ export const POST = withStaffAuth(
           });
           return apiError(400, `The ${label} file could not be read: ${validation.error}`);
         }
-        uploads.push({ file, buffer });
+        uploads.push({ label, file, buffer });
       }
 
       await fs.promises.mkdir(TRIALS_DIR, { recursive: true });
-      const storedNames: string[] = [];
-      for (const { file, buffer } of uploads) {
+      const storedNames: Partial<Record<'answer' | 'submission', string>> = {};
+      for (const { label, file, buffer } of uploads) {
         const name = safeStoredFilename(file.name);
         await fs.promises.writeFile(resolveInsideDir(TRIALS_DIR, name), buffer, { mode: 0o644 });
-        storedNames.push(name);
+        storedNames[label] = name;
         written.push(name);
       }
-      const [answerStoredName, submissionStoredName] = storedNames;
 
       const trial = await prisma.evaluatorTrial.create({
         data: {
@@ -119,9 +143,12 @@ export const POST = withStaffAuth(
           problemType: type as ProblemType,
           maxStates: type === 'FA' || type === 'PDA' ? (maxStates ?? null) : null,
           isDeterministic: type === 'FA' ? (isDeterministic ?? false) : null,
-          answerFileName: answerStoredName,
-          submissionFileName: submissionStoredName,
-          answerOriginalName: answerFile.name,
+          ...(type === 'FA' && moselSpec ? { moselSpec } : {}),
+          ...(rubricDefinition ? { rubricDefinition } : {}),
+          answerFileName: storedNames.answer ?? null,
+          submissionFileName: storedNames.submission ?? null,
+          // None when the trial is marked against its description.
+          answerOriginalName: answerFile?.name ?? null,
           submissionOriginalName: submissionFile.name,
           expiresAt: trialExpiresAt(),
         },
@@ -141,7 +168,9 @@ export const POST = withStaffAuth(
           problemType: type,
           maxStates: trial.maxStates,
           isDeterministic: trial.isDeterministic,
-          answerFileName: answerFile.name,
+          hasMoselSpec: trial.moselSpec != null,
+          rubricId: rubricId ?? null,
+          answerFileName: answerFile?.name ?? null,
           submissionFileName: submissionFile.name,
         },
       });

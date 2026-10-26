@@ -8,7 +8,7 @@ import path from 'path';
 import os from 'os';
 import { randomUUID } from 'crypto';
 
-import { runEvaluatorJar } from './evaluator-runner';
+import { buildGradingConfig, runEvaluatorJar } from './evaluator-runner';
 import { claimAndRunTrial, reapStuckTrials } from './trial-runner';
 import { getEvaluatorConfig, getQueueSettings, type EvaluatorConfig } from './eval-config';
 import { createEnhancedActivityLog, type LogSeverity } from './activity-log-utils';
@@ -37,6 +37,7 @@ const submissionEvalInclude = {
           type: true,
           maxStates: true,
           isDeterministic: true,
+          moselSpec: true,
         },
       },
       assignmentId: true,
@@ -44,6 +45,8 @@ const submissionEvalInclude = {
       maxPoints: true,
       autograderEnabled: true,
       showFeedback: true,
+      // RUBRIC: the definition read at evaluation time and sent to the jar.
+      rubric: { select: { definition: true } },
     },
   },
 } satisfies Prisma.SubmissionInclude;
@@ -118,6 +121,41 @@ interface SubmissionEvaluationResult {
    * the result.
    */
   answerFileName?: string | null;
+  /**
+   * The MOSEL description this run was measured against, when the problem had no answer file.
+   * Set on the same terms as `answerFileName`.
+   */
+  answerMoselSpec?: unknown;
+  /**
+   * The rubric's score from 0 to 1, when a rubric applied and the jar returned one.
+   * RUBRIC: turned into points by {@link earnedPointsFor}.
+   */
+  score?: number;
+  /**
+   * The rubric definition the attempt was scored under, copied onto the submission so a later
+   * edit of the rubric does not change what this attempt says it was graded by.
+   * RUBRIC: stored as `Submission.rubricSnapshot`.
+   */
+  rubricSnapshot?: unknown;
+}
+
+/**
+ * The points an evaluation earns.
+ *
+ * Correct is always full marks; the rubric only decides what an incorrect answer is worth, as a
+ * fraction of the points, rounded to two places. With no rubric, or with the binary placeholder
+ * that is the only kind so far, the score is 0 or absent and this is exactly the old
+ * `correct ? maxPoints : 0`.
+ *
+ * RUBRIC: the score-to-points rule (see RUBRIC_LOCATIONS.md).
+ */
+export function earnedPointsFor(
+  evaluation: { correct?: boolean; score?: number },
+  maxPoints: number,
+): number {
+  if (evaluation.correct) return maxPoints;
+  const score = evaluation.score ?? 0;
+  return Math.round(score * maxPoints * 100) / 100;
 }
 
 async function logSubmissionActivity(
@@ -579,6 +617,16 @@ export async function persistEvaluation(opts: {
           status: opts.evaluation.status,
           // Recorded only when a key was opened; a failed run names none.
           answerFileName: opts.evaluation.answerFileName ?? null,
+          answerMoselSpec:
+            opts.evaluation.answerMoselSpec == null
+              ? Prisma.DbNull
+              : (opts.evaluation.answerMoselSpec as Prisma.InputJsonValue),
+          // RUBRIC: the score and the rubric it came from, recorded like the key above.
+          score: opts.evaluation.score ?? null,
+          rubricSnapshot:
+            opts.evaluation.rubricSnapshot == null
+              ? Prisma.DbNull
+              : (opts.evaluation.rubricSnapshot as Prisma.InputJsonValue),
           // The condition this attempt was graded under, recorded rather than looked up later.
           // The problem's setting can be changed mid-term, and a study that compares showing the
           // witness string against withholding it needs to know which one a given attempt got.
@@ -608,7 +656,8 @@ export async function persistEvaluation(opts: {
         /**
          * What the problem is worth now, from its own row, held.
          *
-         * A correct answer scores full marks, so this number *is* the points. They were read
+         * A correct answer scores full marks and a rubric scores a fraction of them, so the
+         * points are computed from this number (see `earnedPointsFor`). They were read
          * when the worker picked the submission up, which can be a while before this commits,
          * and an instructor lowering them in between would leave a mark above the ceiling the
          * gradebook and the LMS both measure against. Same row and same order every grade
@@ -620,7 +669,7 @@ export async function persistEvaluation(opts: {
         });
         // Detached from the assignment while this was in flight: the result is still recorded
         // above, but there is no longer a problem for it to be worth anything on.
-        const earnedPoints = locked && opts.evaluation.correct ? locked.maxPoints : 0;
+        const earnedPoints = locked ? earnedPointsFor(opts.evaluation, locked.maxPoints) : 0;
 
         if (
           await holdsTheStandingGrade(tx, {
@@ -760,12 +809,14 @@ async function evaluateSubmission(id: string, token: string | null = null) {
     // Logged after the commit, never inside it: an audit write that fails must not roll back a
     // grade that is already correct, which is the trade AFCT makes everywhere else too.
     if (outcome === 'graded') {
-      const earnedPoints = evaluation.correct ? submission.assignmentProblem.maxPoints : 0;
+      const earnedPoints = earnedPointsFor(evaluation, submission.assignmentProblem.maxPoints);
       await logSubmissionActivity(submission, 'SUBMISSION_AUTOGRADED', 'INFO', {
         studentId: submission.studentId,
         grade: earnedPoints,
         maxPoints: submission.assignmentProblem.maxPoints,
         correct: evaluation.correct ?? null,
+        // RUBRIC: logged so a partial grade can be traced back to its score.
+        ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
       });
       console.log(
         `[SubmissionWorker] Auto-graded submission ${id}: ${earnedPoints} points (correct: ${evaluation.correct})`,
@@ -923,7 +974,16 @@ async function runJavaEvaluator(
     }
 
     // Docker/Linux: run afct-evaluator.jar against the problem's answer key.
-    const answerFileName = submission.assignmentProblem.problem.fileName;
+    const problem = submission.assignmentProblem.problem;
+    const answerFileName = problem.fileName;
+    // An FA problem with no answer file is marked against its MOSEL description, which the
+    // jar turns into the same kind of key. Which description is recorded like the file.
+    if (!answerFileName && problem.type === 'FA' && problem.moselSpec != null) {
+      return {
+        ...(await evaluateWithJar(submission, config, null, uploadedFilePath)),
+        answerMoselSpec: problem.moselSpec,
+      };
+    }
     if (!answerFileName) {
       await logSubmissionActivity(submission, 'SUBMISSION_EVALUATION_ERROR', 'ERROR', {
         error: 'No answer file configured for this problem.',
@@ -975,14 +1035,23 @@ function countFileLines(filePath: string): number {
 async function evaluateWithJar(
   submission: WorkerSubmission,
   config: EvaluatorConfig,
-  answerFilePath: string,
+  /** Null to mark against the problem's MOSEL description. */
+  answerFilePath: string | null,
   uploadedFilePath: string,
 ): Promise<SubmissionEvaluationResult> {
+  // RUBRIC: the rubric definition is read from the problem's assignment link at this moment and
+  // copied onto the result, so the attempt records what it was actually graded by.
+  const rubricDefinition = submission.assignmentProblem.rubric?.definition ?? null;
   const run = await runEvaluatorJar({
     answerFilePath,
     uploadedFilePath,
     config,
     problem: submission.assignmentProblem.problem,
+    grading: buildGradingConfig({
+      type: submission.assignmentProblem.problem.type,
+      moselSpec: submission.assignmentProblem.problem.moselSpec,
+      rubricDefinition,
+    }),
   });
 
   if (run.stderr) {
@@ -1050,5 +1119,7 @@ async function evaluateWithJar(
     correct: run.correct,
     evaluationRaw: run.evaluation,
     status: 'COMPLETED',
+    ...(run.score !== undefined ? { score: run.score } : {}),
+    ...(rubricDefinition != null ? { rubricSnapshot: rubricDefinition } : {}),
   };
 }

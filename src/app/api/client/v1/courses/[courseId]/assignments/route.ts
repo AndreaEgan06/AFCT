@@ -99,6 +99,8 @@ export const GET = withClientAuth(async (_req, ctx: RouteCtx, { user }) => {
         submissionCount: p.submissionCount,
         grade: p.grade,
         status: p.status,
+        // RUBRIC: "solved" is read off the grade, which only works while a rubric cannot give an
+        // incorrect answer full marks (see earnedPointsFor). Revisit if a rubric ever can.
         // Full marks earned (autograde fans a correct grade out to every group member).
         solved: p.grade != null && p.maxPoints > 0 && p.grade >= p.maxPoints,
       })),

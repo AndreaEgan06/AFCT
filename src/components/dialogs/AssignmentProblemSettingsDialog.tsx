@@ -12,7 +12,9 @@ import {
 import { Button } from '@/components/ui/button';
 import InputGroup from '@/components/ui/InputGroup';
 import SwitchField from '@/components/ui/SwitchField';
+import SelectField from '@/components/ui/SelectField';
 import { LimitField } from '@/components/ui/LimitField';
+import Link from 'next/link';
 
 import { useEffect, useState } from 'react';
 
@@ -41,9 +43,15 @@ type AssignmentProblemSettingsDialogProps = {
   onSaved?: () => void;
 };
 
+/** The picker's value for "no rubric"; a Radix select cannot use the empty string. */
+const NO_RUBRIC = 'none';
+
+/** What the picker needs from each rubric the caller can attach here. */
+type RubricOption = { id: string; name: string; owner: { name: string }; canEdit: boolean };
+
 /**
  * Edits how one problem counts inside one assignment: points, accepted-submission cap
- * (unlimited or a number), and whether it is autograded. These live on the
+ * (unlimited or a number), whether it is autograded, and which rubric grades it. These live on the
  * AssignmentProblem link, so the same problem can have different values in each
  * assignment. The problem definition itself is edited in the course problem bank.
  */
@@ -76,6 +84,12 @@ export function AssignmentProblemSettingsDialog({
   const [savedShowFeedback, setSavedShowFeedback] = useState<boolean>(
     settings.showFeedback !== false,
   );
+  /**
+   * RUBRIC: the picker. Null until the current choice has been read; until then nothing about
+   * the rubric is sent, so a dialog that could not load it cannot clear it by saving.
+   */
+  const [rubricId, setRubricId] = useState<string | null>(null);
+  const [rubricOptions, setRubricOptions] = useState<RubricOption[]>([]);
 
   // Re-seed from the passed settings each time the dialog opens.
   useEffect(() => {
@@ -93,14 +107,16 @@ export function AssignmentProblemSettingsDialog({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    setRubricId(null);
     void apiClient
-      .get<{ showFeedback?: boolean; submissionCount?: number }>(
+      .get<{ showFeedback?: boolean; submissionCount?: number; rubricId?: string | null }>(
         apiPaths.assignmentProblem(courseId, assignmentId, problemId),
       )
       .then((data) => {
         if (cancelled) return;
         setAttemptsSoFar(data.submissionCount ?? 0);
         setSavedShowFeedback(data.showFeedback !== false);
+        setRubricId(data.rubricId ?? NO_RUBRIC);
       })
       .catch(() => {
         // The warning is a courtesy, not a gate. If the count cannot be read the dialog still
@@ -111,6 +127,23 @@ export function AssignmentProblemSettingsDialog({
       cancelled = true;
     };
   }, [open, courseId, assignmentId, problemId]);
+
+  // The rubrics that can be attached here: the caller's own, and any already used in this course.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void apiClient
+      .get<{ rubrics?: RubricOption[] }>(apiPaths.rubrics({ courseId }))
+      .then((data) => {
+        if (!cancelled) setRubricOptions(data.rubrics ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRubricOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, courseId]);
 
   const pointsValue = Number(maxPoints);
   const pointsInvalid = !Number.isFinite(pointsValue) || pointsValue < 0;
@@ -140,6 +173,8 @@ export function AssignmentProblemSettingsDialog({
         maxSubmissions: unlimited ? -1 : Math.max(1, Math.floor(submissionsValue)),
         autograderEnabled,
         showFeedback,
+        // RUBRIC: only once the current choice is known; omitted leaves it as it is.
+        ...(rubricId !== null ? { rubricId: rubricId === NO_RUBRIC ? null : rubricId } : {}),
       });
       showToast.updated('Problem settings');
       onSaved?.();
@@ -207,6 +242,28 @@ export function AssignmentProblemSettingsDialog({
             descriptionPlacement="inline"
             description="When disabled, students see only whether their submission was correct. Feedback is still recorded and remains visible to instructors."
           />
+
+          <SelectField
+            label="Rubric"
+            name="assignment-problem-rubric"
+            id="assignment-problem-rubric"
+            value={rubricId ?? NO_RUBRIC}
+            onValueChange={setRubricId}
+            disabled={rubricId === null}
+            options={[
+              { value: NO_RUBRIC, label: 'None (full points when correct)' },
+              ...rubricOptions.map((r) => ({
+                value: r.id,
+                label: r.canEdit ? r.name : `${r.name} (${r.owner.name})`,
+              })),
+            ]}
+            description="How a graded attempt becomes points. Rubrics are kept in your library and can be reused on any problem."
+          />
+          <p className="text-muted-foreground -mt-2 text-sm">
+            <Link href="/dashboard/rubrics" className="underline underline-offset-2">
+              Manage rubrics
+            </Link>
+          </p>
 
           {/*
             The one live region in this dialog. The warning appears in response to flipping the

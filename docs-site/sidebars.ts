@@ -55,6 +55,7 @@ const sidebars: SidebarsConfig = {
         'faculty/problems',
         'faculty/descriptions',
         'faculty/evaluator-sandbox',
+        'faculty/rubrics',
         {
           type: 'category',
           label: 'Assignments',

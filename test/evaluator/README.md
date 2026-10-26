@@ -45,6 +45,22 @@ docker exec afct-dev-worker sh -c 'cd /app && npm run test:evaluator'
    meant to _refuse_, so a refusal never degrades into a bare "incorrect" that a student
    would read as a wrong answer.
 
+   Optional: `"gradingConfig": { "mosel": ..., "rubric": ... }` is sent the way the worker
+   sends it (`--grading-config -`, on stdin), and `"expectScore"` / `"expectConflictedStates"`
+   check the rubric score and the MOSEL analysis that come back. These guard that the shipped
+   jar understands the grading config at all: a jar that does not would fail every submission
+   to a problem with a rubric or a language description.
+   <!-- RUBRIC: the grading-config cases for the shipped jar. -->
+
+   Optional: `"answer": null` marks the submission against the grading config's MOSEL
+   description (`--answer-from-mosel`), the way the worker marks a problem that has a
+   description and no answer file. Add `"sameFeedbackAs": "some-solution.jff"`, an answer file
+   for the same language, and the case also checks that the verdict and the feedback are
+   exactly what that answer file gives: a student must not be able to tell the difference.
+   Use a wrong submission whose example string is forced (only one shortest string tells it
+   apart): where several would do, the equivalence check's pick depends on the answer
+   automaton's layout, for an answer file as much as for a description.
+
    `maxStates`/`deterministic` map to the same per-type args
    `buildEvaluatorArgs()` sends in `src/lib/submission-worker.ts`.
 

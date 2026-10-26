@@ -62,6 +62,14 @@ const attachBoth = async () => {
   await attach(/submission file/i, 'student.jff');
 };
 
+/**
+ * The request that starts the run. Picked out by method rather than position: the page also
+ * fetches the rubric list when it opens.
+ */
+const startCall = () =>
+  fetchMock.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === 'POST') as
+    [string, RequestInit] | undefined;
+
 beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
@@ -115,8 +123,8 @@ describe('EvaluatorSandboxClient', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    await waitFor(() => expect(startCall()).toBeDefined());
+    const [url, init] = startCall()!;
     expect(url).toBe('/api/evaluator-trials');
     const form = init.body as FormData;
     expect(form.get('type')).toBe('FA');
@@ -135,8 +143,8 @@ describe('EvaluatorSandboxClient', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+    await waitFor(() => expect(startCall()).toBeDefined());
+    const form = startCall()![1].body as FormData;
     expect(form.get('maxStates')).toBeNull();
     expect(form.get('isDeterministic')).toBeNull();
   });
@@ -287,5 +295,89 @@ describe('what a screen reader is told', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
     await waitFor(() => expect(liveRegion()).toHaveTextContent(/Correct/));
+  });
+
+  describe('the MOSEL description and rubric', () => {
+    const listing = {
+      rubrics: [{ id: 'r1', name: 'Binary', owner: { name: 'Me' }, canEdit: true }],
+    };
+    const routed = (run: unknown) =>
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+        String(url).startsWith('/api/rubrics')
+          ? { ok: true, json: async () => listing }
+          : { ok: true, json: async () => (init?.method === 'POST' ? trial() : run) },
+      );
+
+    const fillDescription = (alphabet: string, formula: string) => {
+      fireEvent.change(screen.getByLabelText('Alphabet'), { target: { value: alphabet } });
+      fireEvent.change(screen.getByLabelText('Condition'), { target: { value: formula } });
+    };
+
+    it('sends both when they are given', async () => {
+      routed(trial());
+      renderPage();
+      await attachBoth();
+      fillDescription('a, b', "endWt 'ab'");
+      await screen.findByRole('option', { name: 'Binary' });
+      fireEvent.change(screen.getByLabelText(/^rubric$/i), { target: { value: 'r1' } });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+      await waitFor(() => expect(startCall()).toBeDefined());
+      const form = startCall()![1].body as FormData;
+      expect(form.get('moselSpec')).toBe(
+        '{"alphabet":["a","b"],"condition":{"kind":"endWt","w":"ab"}}',
+      );
+      expect(form.get('rubricId')).toBe('r1');
+    });
+
+    it('runs against the description when there is no answer file', async () => {
+      routed(trial());
+      renderPage();
+      await attach(/submission file/i, 'student.jff');
+      expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
+      fillDescription('0, 1', "|indOf '10'| = 0");
+
+      fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+      await waitFor(() => expect(startCall()).toBeDefined());
+      const form = startCall()![1].body as FormData;
+      expect(form.get('answerFile')).toBeNull();
+      expect(JSON.parse(form.get('moselSpec') as string)).toEqual({
+        alphabet: ['0', '1'],
+        condition: { kind: 'count', w: '10', cmp: '=', n: 0 },
+      });
+    });
+
+    it('will not run with a description that is not valid', async () => {
+      routed(trial());
+      renderPage();
+      await attachBoth();
+
+      fillDescription('a', "begWt 'a' AND");
+
+      expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
+    });
+
+    it('shows the score and a summary of the analysis', async () => {
+      routed(
+        trial({
+          state: 'COMPLETED',
+          correct: false,
+          score: 0,
+          evaluationRaw: {
+            correct: false,
+            analysis: { counts: { CONSISTENT: 2, CONFLICTED: 1 }, specMatchesAnswerKey: true },
+          },
+        }),
+      );
+      renderPage();
+      await attachBoth();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+      expect(await screen.findByText('States: 2 consistent, 1 conflicted.')).toBeInTheDocument();
+      expect(screen.getByText('Score')).toBeInTheDocument();
+    });
   });
 });

@@ -11,7 +11,11 @@ import { createWithUniqueCourseCode } from '@/lib/course-code';
 import { parseValidDate } from '@/lib/date-format';
 import { toDateTimeInTimezone } from '@/lib/date-convert';
 import { toEmptyStringNotation } from '@/lib/empty-string-notation';
-import { copyAnswerKeysForProblems, MissingAnswerKeyError } from '@/lib/problem-copy';
+import {
+  copyAnswerKeysForProblems,
+  MissingAnswerKeyError,
+  moselSpecCopy,
+} from '@/lib/problem-copy';
 import type { Prisma, Problem } from '@prisma/client';
 
 // Permissive body schema: guarantees a well-typed object (and rejects malformed
@@ -395,6 +399,7 @@ export const POST = withAdminAuth(
                   type: p.type ?? undefined,
                   maxStates: p.maxStates ?? undefined,
                   isDeterministic: p.isDeterministic ?? undefined,
+                  moselSpec: moselSpecCopy(p.moselSpec),
                   courseId: newCourse.id,
                 },
               });
@@ -412,6 +417,7 @@ export const POST = withAdminAuth(
                 maxSubmissions: number;
                 autograderEnabled: boolean;
                 showFeedback: boolean;
+                rubricId: string | null;
               }[] = [];
               for (const a of originalAssignments) {
                 const createdA = await tx.assignment.create({
@@ -468,6 +474,9 @@ export const POST = withAdminAuth(
                       // Carried, not defaulted: this is a study condition, and a duplicated
                       // course silently reverting to "feedback shown" would change it.
                       showFeedback: ap.showFeedback,
+                      // RUBRIC: by reference. Rubrics belong to an instructor rather than a
+                      // course, so the copy grades the way the original does.
+                      rubricId: ap.rubricId,
                     });
                   }
                 }
